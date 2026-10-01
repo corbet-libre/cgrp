@@ -44,3 +44,14 @@ its band. Threads must recheck time/current authority before publication.
 `Persistence::commit` returns `CommitFuture`; `Candidate::persist` is async and
 releases committed capabilities only after the shared transaction reports
 `Applied`. Browser adapters must await IndexedDB, never block the browser.
+
+Pending work uses `PreparedEffect::valid_until()`, the minimum of the original
+policy and every verified signed consent expiry. `Candidate::persist(store,
+now).await` refuses expired or regressed preparation before writing. Shared
+transaction adapters must revalidate current authority before committing; an
+old preparation is not a lease. Committed outbox delivery remains distinct.
+
+The canonical encrypted cwst record is owner `cgrp`, key `snapshot.v1`, with
+Postcard 1 serde encoding of `Snapshot`. JSON cannot encode this snapshot's
+binary map keys. Decode only authenticated device-storage records; arbitrary
+frontend bytes and a deserialized DTO are never membership authority.
