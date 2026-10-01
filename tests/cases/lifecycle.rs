@@ -106,7 +106,7 @@ fn consent_and_atomic_publication_refuse_replay_and_corruption() {
         let result = futures::executor::block_on(
             prepare(&s, &good, &p, &TestAuthority, 0, 128)
                 .unwrap()
-                .persist(&mut store),
+                .persist(&mut store, 0),
         );
         assert_eq!(
             result.unwrap_err(),
@@ -344,5 +344,41 @@ fn inherited_opening_forks_preserve_deadline_and_visibility() {
                 .iter()
                 .any(|e| e.event() == &Effect::ConsentLapsed { group: [4; 32] })
         );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn pending_work_cannot_outlive_signed_consent() {
+    let s = Snapshot::empty("test-community".into());
+    let r = request(
+        &s,
+        Command::Create {
+            id: [1; 32],
+            members: members(0, 3),
+            seed: false,
+        },
+        "m0",
+        members(0, 3),
+        false,
+        5,
+    );
+    for (now, error) in [(4, Error::Clock), (5 + DAY, Error::Authority)] {
+        let candidate = prepare(
+            &s,
+            &r,
+            &SignedPolicy::new(&policy()),
+            &TestAuthority,
+            5,
+            128,
+        )
+        .unwrap();
+        assert_eq!(candidate.prepare_effects()[0].valid_until(), 5 + DAY);
+        let mut store = Store::new(&s);
+        assert_eq!(
+            futures::executor::block_on(candidate.persist(&mut store, now)).unwrap_err(),
+            error
+        );
+        assert_eq!(store.revision, 0);
     }
 }

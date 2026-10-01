@@ -212,9 +212,14 @@ pub struct PreparedEffect<'a> {
     event: &'a Effect,
     band: &'a Band,
     valid_until: u64,
+    consent_valid_until: u64,
 }
 
 impl PreparedEffect<'_> {
+    /// Earliest policy or signed-consent expiry; preparation confers no lease.
+    pub fn valid_until(&self) -> u64 {
+        self.valid_until.min(self.consent_valid_until)
+    }
     /// Exact verified curve row selected for this effect and candidate revision.
     pub fn policy_band(&self) -> &Band {
         self.band
@@ -236,6 +241,7 @@ pub struct Candidate {
     snapshot: Snapshot,
     effects: Vec<Effect>,
     policy: Policy,
+    consent_valid_until: u64,
 }
 
 impl Candidate {
@@ -256,6 +262,7 @@ impl Candidate {
                     event,
                     band,
                     valid_until: self.policy.valid_until,
+                    consent_valid_until: self.consent_valid_until,
                 }
             })
             .collect()
@@ -265,7 +272,14 @@ impl Candidate {
     pub async fn persist(
         self,
         store: &mut dyn Persistence,
+        now: u64,
     ) -> Result<(Snapshot, Vec<CommittedEffect>)> {
+        if now < self.snapshot.now {
+            return Err(Error::Clock);
+        }
+        if now >= self.policy.valid_until.min(self.consent_valid_until) {
+            return Err(Error::Authority);
+        }
         match store
             .commit(self.expected, &self.snapshot, &self.effects)
             .await?
@@ -645,6 +659,12 @@ pub fn prepare(
         expected: state.revision,
         snapshot: next,
         effects,
+        consent_valid_until: request
+            .consents
+            .iter()
+            .map(|c| c.valid_until)
+            .min()
+            .unwrap_or(policy.valid_until),
         policy,
     })
 }

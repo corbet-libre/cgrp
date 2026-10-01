@@ -243,10 +243,11 @@ pub fn apply(state: &Snapshot, r: &Request, now: u64) -> (Snapshot, Vec<Committe
     .unwrap();
     for effect in candidate.prepare_effects() {
         assert_eq!(effect.policy_valid_until(), policy().valid_until);
+        assert!(effect.valid_until() <= effect.policy_valid_until());
         assert!(policy().bands.contains(effect.policy_band()));
     }
     let mut store = Store::new(state);
-    let output = futures::executor::block_on(candidate.persist(&mut store)).unwrap();
+    let output = futures::executor::block_on(candidate.persist(&mut store, now)).unwrap();
     assert_eq!(store.read(), output.0);
     output
 }
