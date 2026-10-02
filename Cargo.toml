@@ -13,9 +13,10 @@ serde_json = "1"
 thiserror = "2"
 schemars = "1"
 ckmg = { git = "https://github.com/corbet-foss/ckmg", branch = "main" }
+cwst = { git = "https://github.com/corbet-foss/cwst", branch = "main" }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 futures = "0.3"
 ed25519-dalek = "3"
-postcard = { version = "1", default-features = false, features = ["alloc"] }
 wasm-bindgen-test = "0.3"

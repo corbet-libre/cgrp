@@ -46,11 +46,11 @@ pub enum Command {
 /// Exact statement signed by a currently authorized community device. Signature
 /// verification and current Guard/Contacts authority belong to the trusted port.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Consent {
     pub community: String,
     pub member: String,
     pub operation: Id,
-    pub expected_revision: u64,
     pub policy_epoch: u64,
     pub command_digest: Id,
     pub profile_visibility: bool,
@@ -62,11 +62,10 @@ pub struct Consent {
 impl Consent {
     pub fn signing_bytes(&self) -> Result<Vec<u8>> {
         encode(&(
-            "cgrp.consent.v1",
+            "cgrp.consent.v2",
             &self.community,
             &self.member,
             self.operation,
-            self.expected_revision,
             self.policy_epoch,
             self.command_digest,
             self.profile_visibility,
@@ -84,9 +83,15 @@ pub trait Authority {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Request {
     pub operation: Id,
-    pub expected_revision: u64,
+    /// Canonical sorted commitments to the exact authenticated parent groups.
+    /// A newcomer requires original MLS/invitation import before preparation.
+    pub parents: Vec<crate::ParentRef>,
+    /// Signed command time, shared by all participants. Publication rechecks
+    /// current authority; waiting never moves opening or cooldown timestamps.
+    pub effective_at: u64,
     pub actor: String,
     pub command: Command,
     pub consents: Vec<Consent>,
@@ -94,12 +99,22 @@ pub struct Request {
 
 impl Request {
     pub fn command_digest(&self) -> Result<Id> {
-        Ok(*ckmg::hash(&encode(&(&self.actor, &self.command))?).value())
+        Ok(*ckmg::hash(&encode(&(
+            "cgrp.command.v2",
+            &self.actor,
+            &self.command,
+            &self.parents,
+            self.effective_at,
+        ))?)
+        .value())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Group {
+    pub(crate) revision: u64,
+    pub(crate) policy_epoch: u64,
+    pub(crate) changed_at: u64,
     pub(crate) id: Id,
     pub(crate) lineage: Id,
     pub(crate) parents: Vec<Id>,
@@ -123,6 +138,29 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Read only the canonical Groups checkpoint from the original encrypted
+    /// Store. A missing initial record is empty; corrupt or foreign state fails.
+    /// This is a local view, not a membership or consent capability.
+    pub fn load<B: cwst::backend::Backend>(
+        community: &str,
+        store: &cwst::Store<B>,
+    ) -> Result<Self> {
+        if !store.is_scope(community) {
+            return Err(Error::Authority);
+        }
+        let snapshot = match store
+            .read("cgrp", b"snapshot.v1")
+            .map_err(|_| Error::Reconcile)?
+        {
+            Some(bytes) => postcard::from_bytes::<Self>(bytes).map_err(|_| Error::Invalid)?,
+            None => Self::empty(community.into()),
+        };
+        if snapshot.community != community {
+            return Err(Error::Authority);
+        }
+        Ok(snapshot)
+    }
+
     pub fn empty(community: String) -> Self {
         Self {
             community,
@@ -213,9 +251,13 @@ pub struct PreparedEffect<'a> {
     band: &'a Band,
     valid_until: u64,
     consent_valid_until: u64,
+    state: crate::GroupState,
 }
 
 impl PreparedEffect<'_> {
+    pub fn group_state(&self) -> &crate::GroupState {
+        &self.state
+    }
     /// Earliest policy or signed-consent expiry; preparation confers no lease.
     pub fn valid_until(&self) -> u64 {
         self.valid_until.min(self.consent_valid_until)
@@ -238,13 +280,73 @@ impl PreparedEffect<'_> {
 
 pub struct Candidate {
     expected: u64,
+    base: Snapshot,
+    request: Request,
+    max_groups: usize,
     snapshot: Snapshot,
     effects: Vec<Effect>,
     policy: Policy,
     consent_valid_until: u64,
+    transition_valid_until: u64,
 }
 
 impl Candidate {
+    /// Require the exact predecessor loaded from authenticated owner storage,
+    /// not merely its numeric revision. A deserialized alternate snapshot with
+    /// the same revision cannot replace membership, lineage or replay state.
+    pub fn check_base(&self, current: &Snapshot) -> Result<()> {
+        if &self.base != current {
+            return Err(Error::Conflict);
+        }
+        Ok(())
+    }
+
+    /// Repeat the original consent, contact, seed and signed-policy checks at
+    /// publication time, after asynchronous custody work. Preparation is not a
+    /// lease: revocation or a changed policy refuses the whole candidate.
+    /// Original command times remain fixed, so waiting cannot reset an opening
+    /// deadline, cooldown or join timestamp. Crossing a timed privacy transition
+    /// requires a fresh preparation instead of publishing the old state.
+    pub fn revalidate(
+        &self,
+        source: &impl PolicySource,
+        authority: &impl Authority,
+        now: u64,
+    ) -> Result<()> {
+        self.check_time(now)?;
+        let fresh = prepare_at(
+            &self.base,
+            &self.request,
+            source,
+            authority,
+            (self.snapshot.now, now),
+            self.max_groups,
+        )?;
+        if fresh.snapshot != self.snapshot
+            || fresh.effects != self.effects
+            || fresh.policy != self.policy
+        {
+            return Err(Error::Authority);
+        }
+        Ok(())
+    }
+
+    fn check_time(&self, now: u64) -> Result<()> {
+        if now < self.snapshot.now {
+            return Err(Error::Clock);
+        }
+        if now
+            >= self
+                .policy
+                .valid_until
+                .min(self.consent_valid_until)
+                .min(self.transition_valid_until)
+        {
+            return Err(Error::Authority);
+        }
+        Ok(())
+    }
+
     pub fn prepare_effects(&self) -> Vec<PreparedEffect<'_>> {
         self.effects
             .iter()
@@ -258,11 +360,15 @@ impl Candidate {
                 // validated every group's band against this exact Policy.
                 let band = &self.policy.bands[self.snapshot.groups[group].band];
                 PreparedEffect {
+                    state: crate::GroupState::new(
+                        &self.snapshot.community,
+                        &self.snapshot.groups[group],
+                    ),
                     community: &self.snapshot.community,
                     event,
                     band,
                     valid_until: self.policy.valid_until,
-                    consent_valid_until: self.consent_valid_until,
+                    consent_valid_until: self.consent_valid_until.min(self.transition_valid_until),
                 }
             })
             .collect()
@@ -274,12 +380,7 @@ impl Candidate {
         store: &mut dyn Persistence,
         now: u64,
     ) -> Result<(Snapshot, Vec<CommittedEffect>)> {
-        if now < self.snapshot.now {
-            return Err(Error::Clock);
-        }
-        if now >= self.policy.valid_until.min(self.consent_valid_until) {
-            return Err(Error::Authority);
-        }
+        self.check_time(now)?;
         match store
             .commit(self.expected, &self.snapshot, &self.effects)
             .await?
@@ -368,14 +469,36 @@ pub fn prepare(
     now: u64,
     max_groups: usize,
 ) -> Result<Candidate> {
+    prepare_at(state, request, source, authority, (now, now), max_groups)
+}
+
+fn prepare_at(
+    state: &Snapshot,
+    request: &Request,
+    source: &impl PolicySource,
+    authority: &impl Authority,
+    (now, authorized_at): (u64, u64),
+    max_groups: usize,
+) -> Result<Candidate> {
     if now < state.now {
         return Err(Error::Clock);
     }
-    if request.expected_revision != state.revision {
+    if request.effective_at > now {
+        return Err(Error::Clock);
+    }
+    if request.parents != state.parent_references(&request.command)? {
         return Err(Error::Conflict);
     }
-    let policy = source.current(&state.community, now)?;
-    policy.validate(now)?;
+    if request.parents.iter().any(|parent| {
+        state
+            .groups
+            .get(&parent.id)
+            .is_some_and(|group| group.changed_at > request.effective_at)
+    }) {
+        return Err(Error::Clock);
+    }
+    let policy = source.current(&state.community, authorized_at)?;
+    policy.validate(authorized_at)?;
     if policy.epoch < state.policy_epoch {
         return Err(Error::Policy);
     }
@@ -397,17 +520,16 @@ pub fn prepare(
     for c in &request.consents {
         if c.community != state.community
             || c.operation != request.operation
-            || c.expected_revision != state.revision
             || c.policy_epoch != policy.epoch
             || c.command_digest != digest
-            || c.valid_until <= now
+            || c.valid_until <= authorized_at
             || c.member.is_empty()
             || c.member.len() > 200
             || !verified.insert(c.member.clone())
         {
             return Err(Error::Authority);
         }
-        authority.consent(c, now)?;
+        authority.consent(c, authorized_at)?;
     }
     if !matches!(request.command, Command::Tick) && !verified.contains(&request.actor) {
         return Err(Error::Authority);
@@ -418,9 +540,21 @@ pub fn prepare(
     next.revision = state.revision.checked_add(1).ok_or(Error::Capacity)?;
     next.last = Some((request.operation, digest));
     let mut effects = Vec::new();
-    // Apply privacy-increasing time transitions before processing new joins.
-    for g in next.groups.values_mut() {
-        shrink(g, &policy, now, &mut effects);
+    let effective_at = request.effective_at;
+    let affected: BTreeSet<Id> = match &request.command {
+        Command::Create { id, .. } | Command::Fork { id, .. } => BTreeSet::from([*id]),
+        Command::Join { group, .. } | Command::Leave { group } => BTreeSet::from([*group]),
+        Command::Tick => next.groups.keys().copied().collect(),
+    };
+    // A peer command changes its own group only. Unrelated local groups and
+    // nonmover parents must not become part of another device's transcript.
+    // Tick owns local timed transitions; joins first apply their own deadline.
+    for g in next
+        .groups
+        .values_mut()
+        .filter(|g| affected.contains(&g.id))
+    {
+        shrink(g, &policy, effective_at, &mut effects);
     }
     match &request.command {
         Command::Create { id, members, seed } => {
@@ -434,19 +568,22 @@ pub fn prepare(
                 &policy,
             )?;
             if *seed {
-                authority.seed(&state.community, id, now)?;
+                authority.seed(&state.community, id, authorized_at)?;
                 visibility(request, members)?;
             } else {
                 if members.len() > usize::from(policy.circle_max) {
                     return Err(Error::Invalid);
                 }
                 for member in members.iter().filter(|m| **m != request.actor) {
-                    authority.contact(&state.community, &request.actor, member, now)?;
+                    authority.contact(&state.community, &request.actor, member, authorized_at)?;
                 }
             }
             next.groups.insert(
                 *id,
                 Group {
+                    revision: 0,
+                    policy_epoch: policy.epoch,
+                    changed_at: effective_at,
                     id: *id,
                     lineage: *id,
                     parents: vec![],
@@ -500,7 +637,12 @@ pub fn prepare(
                         return Err(Error::Invalid);
                     }
                     for newcomer in members.difference(&union) {
-                        authority.contact(&state.community, &request.actor, newcomer, now)?;
+                        authority.contact(
+                            &state.community,
+                            &request.actor,
+                            newcomer,
+                            authorized_at,
+                        )?;
                     }
                     if members.len() > usize::from(policy.circle_max)
                         && parent.level == Level::Circle
@@ -522,16 +664,16 @@ pub fn prepare(
                         .exclusions
                         .entry(request.actor.clone())
                         .or_insert((0, BTreeMap::new()));
-                    if (!entry.1.is_empty() && now < entry.0.saturating_add(policy.fork_cooldown))
-                        || entry
-                            .1
-                            .get(target)
-                            .is_some_and(|last| now < last.saturating_add(policy.retarget_cooldown))
+                    if (!entry.1.is_empty()
+                        && effective_at < entry.0.saturating_add(policy.fork_cooldown))
+                        || entry.1.get(target).is_some_and(|last| {
+                            effective_at < last.saturating_add(policy.retarget_cooldown)
+                        })
                     {
                         return Err(Error::Conflict);
                     }
-                    entry.0 = now;
-                    entry.1.insert(target.clone(), now);
+                    entry.0 = effective_at;
+                    entry.1.insert(target.clone(), effective_at);
                 }
                 ForkKind::Split => {
                     if !members.is_subset(&union) {
@@ -550,7 +692,7 @@ pub fn prepare(
                     }
                     visibility(request, members)?;
                     level = Level::Opening;
-                    opened = Some(now);
+                    opened = Some(effective_at);
                 }
             }
             if level == Level::Opening {
@@ -572,6 +714,9 @@ pub fn prepare(
             next.groups.insert(
                 *id,
                 Group {
+                    revision: 0,
+                    policy_epoch: policy.epoch,
+                    changed_at: effective_at,
                     id: *id,
                     lineage: parent.lineage,
                     parents: parents.clone(),
@@ -616,17 +761,18 @@ pub fn prepare(
                     if !g.members.contains(v) || !verified.contains(v) {
                         return Err(Error::Authority);
                     }
-                    authority.contact(&state.community, v, member, now)?;
+                    authority.contact(&state.community, v, member, authorized_at)?;
                 }
             }
-            g.joins.retain(|at| now.saturating_sub(*at) < 3_600);
+            g.joins
+                .retain(|at| effective_at.saturating_sub(*at) < 3_600);
             if let Some(limit) = policy.bands[g.band].joins_per_hour
                 && g.joins.len() >= usize::from(limit)
             {
                 return Err(Error::Capacity);
             }
             g.members.insert(member.clone());
-            g.joins.push(now);
+            g.joins.push(effective_at);
             if g.level == Level::Opening && g.members.len() > usize::from(policy.ingroup_max) {
                 g.level = Level::Public;
                 g.opened = None;
@@ -637,13 +783,19 @@ pub fn prepare(
             if !g.members.remove(&request.actor) {
                 return Err(Error::Authority);
             }
-            shrink(g, &policy, now, &mut effects);
+            shrink(g, &policy, effective_at, &mut effects);
         }
         Command::Tick => {}
     }
     for (id, group) in &mut next.groups {
+        if !affected.contains(id) {
+            continue;
+        }
         group.band = policy.band(group.members.len() as u16, group.band)?;
+        group.policy_epoch = policy.epoch;
         if state.groups.get(id) != Some(group) {
+            group.changed_at = effective_at;
+            group.revision = group.revision.checked_add(1).ok_or(Error::Capacity)?;
             effects.push(Effect::Membership {
                 group: *id,
                 lineage: group.lineage,
@@ -651,12 +803,23 @@ pub fn prepare(
                 members: group.members.clone(),
                 level: group.level,
                 policy_epoch: policy.epoch,
-                revision: next.revision,
+                revision: group.revision,
             });
         }
     }
     Ok(Candidate {
         expected: state.revision,
+        base: state.clone(),
+        request: request.clone(),
+        max_groups,
+        transition_valid_until: next
+            .groups
+            .values()
+            .filter(|group| group.level == Level::Opening)
+            .filter_map(|group| group.opened)
+            .map(|opened| opened.saturating_add(policy.open_seconds))
+            .min()
+            .unwrap_or(policy.valid_until),
         snapshot: next,
         effects,
         consent_valid_until: request

@@ -164,7 +164,8 @@ pub fn request(
 ) -> Request {
     let mut r = Request {
         operation: *ckmg::hash(&state.revision().to_le_bytes()).value(),
-        expected_revision: state.revision(),
+        parents: state.parent_references(&command).unwrap_or_default(),
+        effective_at: now,
         actor: actor.into(),
         command,
         consents: vec![],
@@ -174,7 +175,6 @@ pub fn request(
             community: state.community().into(),
             member,
             operation: r.operation,
-            expected_revision: state.revision(),
             policy_epoch: 1,
             command_digest: r.command_digest().unwrap(),
             profile_visibility: visible,

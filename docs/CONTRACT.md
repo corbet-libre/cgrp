@@ -59,3 +59,29 @@ The canonical encrypted cwst record is owner `cgrp`, key `snapshot.v1`, with
 Postcard 1 serde encoding of `Snapshot`. JSON cannot encode this snapshot's
 binary map keys. Decode only authenticated device-storage records; arbitrary
 frontend bytes and a deserialized DTO are never membership authority.
+
+`Snapshot::load(community, &cwst::Store)` owns that canonical decode and refuses
+corrupt or foreign state; absence alone yields an initial empty view.
+`Candidate::revalidate(policy, authority, now)` repeats the original signed
+policy, every consent, required contact and seed authorization against fresh
+authority after asynchronous work. It retains the original request/base and
+command times; no opening, cooldown or join timestamp is extended. Exact policy
+changes or a timed opening transition invalidate pending publication. Threads
+invokes this method after custody checks and before the combined Store commit.
+
+Consent v2 binds the original operation, member, community, policy epoch,
+visibility, expiry and command digest. The command digest binds actor, complete
+command, sorted exact per-group parent commitments and the shared `effective_at`
+time. It never signs a device's local journal revision. Each candidate instead
+retains its complete local predecessor for the Store CAS. Commands change only
+their target; unrelated groups and nonmover parents remain intact. Tick owns
+local timed transitions. Per-group revisions advance only when that group changes.
+
+`GroupState` is a bounded versioned canonical encoding using the existing Groups
+encoder and Keys hash. `PreparedEffect::group_state()` binds it to genuine
+preparation. `Snapshot::group_state` and `parent_references` are metadata, never
+import capabilities. Old v1 consent and checkpoints without per-group revisions
+are refused; no signed-field rewriting or inferred migration is allowed.
+Threads binds the commitment in maintained MLS GroupContext. A newcomer still
+requires independently authenticated invitation/selected-room evidence plus
+verified MLS import; decoding GroupState cannot populate a local parent.

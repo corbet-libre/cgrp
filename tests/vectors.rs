@@ -4,4 +4,6 @@ mod adversarial;
 mod lifecycle;
 #[path = "cases/local.rs"]
 mod local;
+#[path = "cases/publication.rs"]
+mod publication;
 mod support;
