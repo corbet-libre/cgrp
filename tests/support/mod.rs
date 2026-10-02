@@ -7,8 +7,8 @@ pub fn members(start: usize, end: usize) -> BTreeSet<String> {
     (start..end).map(|i| format!("m{i}")).collect()
 }
 
-// These are signed fixture parameters, not a production resolution of the
-// pending band/split decisions. Both legal vector interpretations are tested.
+// Signed fixture parameters use the canonical curve and split defaults.
+// Alternate signed settings exercise the reusable policy-input boundary.
 pub fn policy() -> Policy {
     let edges = [3, 6, 9, 13, 20, 30, 43, 60, 80];
     let posts = [120, 90, 60, 40, 30, 24, 18, 12, 8];

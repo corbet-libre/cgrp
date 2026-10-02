@@ -17,7 +17,8 @@ pub enum Notification {
 #[serde(deny_unknown_fields)]
 pub struct Band {
     pub lower: u16,
-    /// Explicit resolved transition vectors; no interpretation of ambiguous prose.
+    /// Explicit signed transition vectors; canonical defaults enter at the lower
+    /// edge and leave two members below it.
     pub enter_up: u16,
     pub leave_down: u16,
     pub notification: Notification,
@@ -61,7 +62,8 @@ pub struct Policy {
     pub fork_cooldown: u64,
     pub retarget_cooldown: u64,
     pub listing_wait: u64,
-    /// Explicit input pending the fork-creation/shrink threshold decision.
+    /// Minimum size for a newly split public fork; canonical policy is 43,
+    /// separately from the existing-room shrink threshold of 36.
     pub split_public_min: u16,
     pub bands: [Band; 9],
     pub seats: SeatFormats,
@@ -152,7 +154,7 @@ impl Policy {
 }
 
 /// Trusted policy adapter: authenticate exact signed crbk settings, origin,
-/// revision, epoch and expiry. Missing unresolved keys must refuse, not default.
+/// revision, epoch and expiry. Missing required keys must refuse, not default.
 pub trait PolicySource {
     fn current(&self, community: &str, now: u64) -> Result<Policy>;
 }

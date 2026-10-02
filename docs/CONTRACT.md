@@ -12,10 +12,14 @@ Ingroup at 10; authenticated public seeds are exempt. No group admins or kicks.
 Joining, adding, merging, splitting and exclusion forks never cost Waves.
 Accounting grants belong to the accounting owners. Seat formats are disabled.
 
-Unresolved policy inputs: explicit band up/down transition vectors, split-fork
-privacy threshold, canonical exclusion-fork cost key. No default resolves these
-ambiguities. Anonymous room permits, verified restart/handover proofs and real
-MLS/Link integration are external capabilities, never accepting placeholders.
+Policy comes from authenticated settings. The canonical curve enters each band
+at its lower edge and leaves it two members below that edge (20 up, 18 down).
+A newly split public fork needs at least 43 members; the automatic shrink of an
+existing public room remains 36. Exclusion-fork cost is groups.fork_cost_sp (2
+seat points), dormant while seats.enabled is false. These policy values do not
+authorize a group or replace current signed policy and consent checks.
+Anonymous room permits, verified restart/handover proofs and real MLS/Link
+integration remain external capabilities, never accepting placeholders.
 
 ## Implemented API and integration limits
 
