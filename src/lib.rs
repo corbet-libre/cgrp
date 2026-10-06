@@ -5,17 +5,27 @@ mod activity;
 mod lifecycle;
 mod policy;
 mod receipts;
+mod state;
 mod suggestions;
 
 pub use activity::*;
 pub use lifecycle::*;
 pub use policy::*;
 pub use receipts::*;
+pub use state::*;
 pub use suggestions::*;
 
 /// Bounded refusal codes never contain member data or upstream errors.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, schemars::JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub enum Error {
     #[error("invalid input")]
