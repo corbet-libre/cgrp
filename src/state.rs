@@ -89,6 +89,11 @@ impl GroupState {
     pub fn members(&self) -> &BTreeSet<String> {
         &self.group.members
     }
+
+    pub(crate) fn imported_group(&self) -> Result<Group> {
+        self.validate()?;
+        Ok(self.group.clone())
+    }
 }
 
 impl Snapshot {

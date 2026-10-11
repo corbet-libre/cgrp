@@ -85,3 +85,13 @@ are refused; no signed-field rewriting or inferred migration is allowed.
 Threads binds the commitment in maintained MLS GroupContext. A newcomer still
 requires independently authenticated invitation/selected-room evidence plus
 verified MLS import; decoding GroupState cannot populate a local parent.
+
+`prepare_with_parents` admits only exact missing parents through the trusted
+`Authority::parent` port, whose default refuses. The application must supply
+fresh authenticated invitation and maintained MLS evidence for the original
+recipient and operation. Existing groups cannot be replaced. The private
+preparation view includes those parents, but the candidate retains the actual
+original checkpoint, replay state and CAS predecessor. Revalidation repeats
+parent authority alongside original consent, contact, seed and policy checks.
+No imported metadata is committed or exposed as membership/count authority
+before the original shared Groups/Threads transaction succeeds.

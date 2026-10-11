@@ -80,6 +80,13 @@ pub trait Authority {
     fn consent(&self, consent: &Consent, now: u64) -> Result<()>;
     fn contact(&self, community: &str, member: &str, contact: &str, now: u64) -> Result<()>;
     fn seed(&self, community: &str, group: &Id, now: u64) -> Result<()>;
+    /// Authenticate this exact missing parent for the current local recipient
+    /// and original operation. Decoded metadata alone never grants authority.
+    /// The trusted adapter must refresh the original invitation and maintained
+    /// MLS evidence at each call; private peer Lineage is not inferred here.
+    fn parent(&self, _: &crate::GroupState, _: &Request, _: u64) -> Result<()> {
+        Err(Error::Unavailable)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -288,7 +295,11 @@ pub struct Candidate {
     policy: Policy,
     consent_valid_until: u64,
     transition_valid_until: u64,
+    imported_parents: Vec<crate::GroupState>,
 }
+
+mod parents;
+pub use parents::prepare_with_parents;
 
 impl Candidate {
     /// Require the exact predecessor loaded from authenticated owner storage,
@@ -314,9 +325,10 @@ impl Candidate {
         now: u64,
     ) -> Result<()> {
         self.check_time(now)?;
-        let fresh = prepare_at(
+        let fresh = parents::prepare_at_with_parents(
             &self.base,
             &self.request,
+            &self.imported_parents,
             source,
             authority,
             (self.snapshot.now, now),
@@ -829,6 +841,7 @@ fn prepare_at(
             .min()
             .unwrap_or(policy.valid_until),
         policy,
+        imported_parents: vec![],
     })
 }
 
