@@ -70,7 +70,7 @@ pub(super) fn prepare_at_with_parents(
         {
             return Err(Error::Authority);
         }
-        authority.parent(parent, request, time.1)?;
+        authority.parent(parent, request, &policy, time.1)?;
         let group = parent.imported_group()?;
         // The map was cloned from the actual original base, and only missing
         // exact parent IDs reach this branch. Existing history is never replaced.
