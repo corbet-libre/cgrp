@@ -192,6 +192,19 @@ impl Snapshot {
             .map(|g| &g.members)
             .ok_or(Error::Invalid)
     }
+    /// Identifiers of every group in this local view, in canonical order.
+    /// Together with `members` this is the explicit, read-only membership
+    /// interface that Threads and Board consume; it grants no authority.
+    pub fn ids(&self) -> impl Iterator<Item = &Id> {
+        self.groups.keys()
+    }
+    /// One display view per group under the supplied current policy.
+    pub fn views(&self, policy: &Policy, now: u64) -> Result<Vec<GroupView>> {
+        self.groups
+            .keys()
+            .map(|id| view(self, id, policy, now))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
