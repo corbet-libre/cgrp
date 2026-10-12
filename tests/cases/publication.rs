@@ -247,6 +247,8 @@ fn equal_local_revisions_do_not_make_different_membership_interchangeable() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn canonical_snapshot_uses_the_real_encrypted_store() {
+    // `circle` drives its own executor, so it must run outside the async block.
+    let expected = circle(3);
     futures::executor::block_on(async {
         let prf = ckmg::passkey::PrfOutput::from_bytes(&[41; 32]).unwrap();
         let cipher = ckmg::passkey::store_cipher(&prf, "test-community").unwrap();
@@ -262,7 +264,6 @@ fn canonical_snapshot_uses_the_real_encrypted_store() {
             Snapshot::load("other-community", &store),
             Err(Error::Authority)
         );
-        let expected = circle(3);
         for (index, bytes) in [
             b"invalid".to_vec(),
             postcard::to_allocvec(&Snapshot::empty("other-community".into())).unwrap(),
