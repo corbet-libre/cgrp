@@ -40,6 +40,13 @@ pub enum Command {
     Leave {
         group: Id,
     },
+    /// Set the public name and description shown in the forum listing. Any
+    /// member may propose; the ordered result is what the listing key signs.
+    Describe {
+        group: Id,
+        name: String,
+        description: String,
+    },
     Tick,
 }
 
@@ -132,6 +139,12 @@ pub struct Group {
     pub(crate) opened: Option<u64>,
     pub(crate) band: usize,
     pub(crate) joins: Vec<u64>,
+    /// Effective time of the command that created this group or fork.
+    pub(crate) created_at: u64,
+    /// Effective time of the latest departure from this group.
+    pub(crate) churn_at: u64,
+    pub(crate) name: String,
+    pub(crate) description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -569,7 +582,9 @@ fn prepare_at(
     let effective_at = request.effective_at;
     let affected: BTreeSet<Id> = match &request.command {
         Command::Create { id, .. } | Command::Fork { id, .. } => BTreeSet::from([*id]),
-        Command::Join { group, .. } | Command::Leave { group } => BTreeSet::from([*group]),
+        Command::Join { group, .. }
+        | Command::Leave { group }
+        | Command::Describe { group, .. } => BTreeSet::from([*group]),
         Command::Tick => next.groups.keys().copied().collect(),
     };
     // A peer command changes its own group only. Unrelated local groups and
@@ -619,6 +634,10 @@ fn prepare_at(
                     opened: None,
                     band: 0,
                     joins: vec![],
+                    created_at: effective_at,
+                    churn_at: 0,
+                    name: String::new(),
+                    description: String::new(),
                 },
             );
         }
@@ -752,6 +771,10 @@ fn prepare_at(
                     opened,
                     band: 0,
                     joins: vec![],
+                    created_at: effective_at,
+                    churn_at: 0,
+                    name: parent.name.clone(),
+                    description: parent.description.clone(),
                 },
             );
         }
@@ -809,7 +832,23 @@ fn prepare_at(
             if !g.members.remove(&request.actor) {
                 return Err(Error::Authority);
             }
+            g.churn_at = effective_at;
             shrink(g, &policy, effective_at, &mut effects);
+        }
+        Command::Describe {
+            group,
+            name,
+            description,
+        } => {
+            let g = next.groups.get_mut(group).ok_or(Error::Invalid)?;
+            if !g.members.contains(&request.actor) {
+                return Err(Error::Authority);
+            }
+            if !valid_listing_text(name, description) {
+                return Err(Error::Invalid);
+            }
+            g.name = name.clone();
+            g.description = description.clone();
         }
         Command::Tick => {}
     }
@@ -857,6 +896,16 @@ fn prepare_at(
         policy,
         imported_parents: vec![],
     })
+}
+
+/// Bounds shared with the forum's listing entry (64 and 512 bytes, no control characters).
+pub(crate) fn valid_listing_text(name: &str, description: &str) -> bool {
+    name.len() <= 64
+        && description.len() <= 512
+        && !name
+            .chars()
+            .chain(description.chars())
+            .any(char::is_control)
 }
 
 fn validate_new(

@@ -9,13 +9,20 @@
 //! module neither sends nor stores anything; the caller persists
 //! [`Listings::encode`] in the encrypted device store.
 //!
+//! The name and description are ordinary group state (`Command::Describe`), so
+//! the ordered result is what gets signed. After any departure or fork the key
+//! is rotated at the next window boundary ([`Listings::rotation_due`],
+//! [`Listings::rotate`]): the new key means a new room id, the old entry gets a
+//! tombstone and expires. Residual: an ex-member who still holds a valid room
+//! pass could keep a ghost entry alive until its lifetime ends.
+//!
 //! Counters are derived, never chosen: `window << 32 | group revision`, where
 //! `window` counts [`LISTING_WINDOW`] spans of wall time. Every member who signs
 //! in the same window therefore produces the identical entry (ed25519 is
 //! deterministic), so concurrent re-publication never conflicts at the forum,
 //! while every ordered group change or new window yields a strictly newer entry.
-use crate::{DAY, Error, Id, Level, Result, Snapshot, encode};
-use cmbl::listing::{DESCRIPTION_BYTES, Entry, NAME_BYTES, SignedEntry};
+use crate::{DAY, Error, Group, Id, Level, Result, Snapshot, encode};
+use cmbl::listing::{Entry, SignedEntry};
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -41,6 +48,12 @@ struct Held {
     /// Lowest window this key may sign in; raised when the listing is handed to
     /// a fork so the child's counters always exceed the parent's.
     floor_window: u64,
+    /// Rotations so far; a higher generation always replaces a lower one.
+    generation: u32,
+    /// Latest departure/fork time already covered by this key.
+    handled: u64,
+    /// Latest fork time seen on this device that needs a rotation.
+    fork_seen: u64,
     /// Highest counter signed on this device and a digest of its content.
     last: Option<(u64, Id)>,
 }
@@ -67,6 +80,16 @@ pub struct ListingShare {
     pub group: Id,
     secret: [u8; 32],
     floor_window: u64,
+    generation: u32,
+    handled: u64,
+}
+
+/// Result of a rotation: the tombstone for the old entry and the new key to
+/// share with the other members.
+pub struct Rotation {
+    pub tombstone: SignedEntry,
+    pub share: ListingShare,
+    pub room: [u8; 16],
 }
 
 impl std::fmt::Debug for ListingShare {
@@ -123,7 +146,7 @@ impl Listings {
 
     /// Require a public group of this community that this device's owner belongs
     /// to; returns its current revision.
-    fn public_member(&self, snapshot: &Snapshot, group: &Id) -> Result<u64> {
+    fn public_member_group<'a>(&self, snapshot: &'a Snapshot, group: &Id) -> Result<&'a Group> {
         if snapshot.community != self.community {
             return Err(Error::Authority);
         }
@@ -131,7 +154,11 @@ impl Listings {
         if g.level != Level::Public || !g.members.contains(&self.me) {
             return Err(Error::Authority);
         }
-        Ok(g.revision)
+        Ok(g)
+    }
+
+    fn public_member(&self, snapshot: &Snapshot, group: &Id) -> Result<u64> {
+        Ok(self.public_member_group(snapshot, group)?.revision)
     }
 
     /// Create the listing key of a group that is a public room. Returns the
@@ -147,12 +174,19 @@ impl Listings {
         let held = Held {
             secret,
             floor_window: 0,
+            generation: 0,
+            handled: self.churn(snapshot, group),
+            fork_seen: 0,
             last: None,
         };
         secret.zeroize();
         let public = held.public();
         self.held.insert(*group, held);
         Ok(public)
+    }
+
+    fn churn(&self, snapshot: &Snapshot, group: &Id) -> u64 {
+        snapshot.groups.get(group).map_or(0, |g| g.churn_at)
     }
 
     /// The forum's opaque room identifier for this group; room-pass requests use it.
@@ -169,11 +203,14 @@ impl Listings {
             group: *group,
             secret: held.secret,
             floor_window: held.floor_window,
+            generation: held.generation,
+            handled: held.handled,
         })
     }
 
-    /// Accept a key received from a fellow member. If two members created a key
-    /// at the same time, the numerically lowest public key wins on every device.
+    /// Accept a key received from a fellow member. The higher rotation
+    /// generation wins; between equal generations (two members acting at the
+    /// same time) the numerically lowest public key wins on every device.
     pub fn adopt(&mut self, snapshot: &Snapshot, share: &ListingShare) -> Result<()> {
         if share.community != self.community {
             return Err(Error::Authority);
@@ -182,10 +219,14 @@ impl Listings {
         let incoming = Held {
             secret: share.secret,
             floor_window: share.floor_window,
+            generation: share.generation,
+            handled: share.handled,
+            fork_seen: 0,
             last: None,
         };
         if let Some(current) = self.held.get(&share.group)
-            && current.public() <= incoming.public()
+            && (current.generation, std::cmp::Reverse(current.public()))
+                >= (incoming.generation, std::cmp::Reverse(incoming.public()))
         {
             return Ok(());
         }
@@ -201,8 +242,6 @@ impl Listings {
         &mut self,
         snapshot: &Snapshot,
         group: &Id,
-        name: &str,
-        description: &str,
         now: u64,
         withdrawn: bool,
     ) -> Result<SignedEntry> {
@@ -216,9 +255,9 @@ impl Listings {
         if !g.members.contains(&self.me) || (g.level == Level::Public) == withdrawn {
             return Err(Error::Authority);
         }
-        let revision = g.revision;
-        if name.len() > NAME_BYTES || description.len() > DESCRIPTION_BYTES {
-            return Err(Error::Capacity);
+        let (revision, name, description) = (g.revision, g.name.as_str(), g.description.as_str());
+        if !withdrawn && name.trim().is_empty() {
+            return Err(Error::Invalid);
         }
         let held = self.held.get_mut(group).ok_or(Error::Authority)?;
         let window = (now / LISTING_WINDOW).max(held.floor_window);
@@ -247,6 +286,74 @@ impl Listings {
         Ok(signed)
     }
 
+    /// Whether the key must be rotated now: a departure or fork happened after
+    /// the key was created and the next window boundary has passed.
+    pub fn rotation_due(&self, snapshot: &Snapshot, group: &Id, now: u64) -> bool {
+        let Some(held) = self.held.get(group) else {
+            return false;
+        };
+        let trigger = self.churn(snapshot, group).max(held.fork_seen);
+        trigger > held.handled && now >= (trigger / LISTING_WINDOW + 1) * LISTING_WINDOW
+    }
+
+    /// Replace the key of a public room: sign a tombstone with the old key and
+    /// create the next generation. The caller sends `share` to the other
+    /// members, publishes the tombstone under the old room and requests passes
+    /// under the new room id. Batching comes from [`Listings::rotation_due`].
+    pub fn rotate(&mut self, snapshot: &Snapshot, group: &Id, now: u64) -> Result<Rotation> {
+        if !self.rotation_due(snapshot, group, now) {
+            return Err(Error::Conflict);
+        }
+        let g = self.public_member_group(snapshot, group)?;
+        let (revision, name, description) = (g.revision, g.name.clone(), g.description.clone());
+        let churn = self.churn(snapshot, group);
+        let old = self.held.get(group).ok_or(Error::Authority)?;
+        let window = (now / LISTING_WINDOW).max(old.floor_window) + 1;
+        let counter = (u64::from(u32::try_from(window).map_err(|_| Error::Clock)?) << 32)
+            | u64::from(u32::try_from(revision).unwrap_or(u32::MAX));
+        let key = SigningKey::from_bytes(&old.secret);
+        let tombstone = SignedEntry::sign(
+            Entry {
+                key: key.verifying_key().to_bytes(),
+                name,
+                description,
+                counter,
+                expires_ms: (window + 2)
+                    .saturating_mul(LISTING_WINDOW)
+                    .saturating_mul(1_000),
+                withdrawn: true,
+            },
+            &key,
+        )
+        .map_err(|_| Error::Invalid)?;
+        let mut secret = [0u8; 32];
+        getrandom::fill(&mut secret).map_err(|_| Error::Unavailable)?;
+        let next = Held {
+            secret,
+            floor_window: 0,
+            generation: old.generation.saturating_add(1),
+            handled: churn.max(old.fork_seen),
+            fork_seen: 0,
+            last: None,
+        };
+        secret.zeroize();
+        let share = ListingShare {
+            community: self.community.clone(),
+            group: *group,
+            secret: next.secret,
+            floor_window: 0,
+            generation: next.generation,
+            handled: next.handled,
+        };
+        let room = cmbl::listing::room_id(&next.public());
+        self.held.insert(*group, next);
+        Ok(Rotation {
+            tombstone,
+            share,
+            room,
+        })
+    }
+
     /// Forget the key of a group, for example after its tombstone was accepted
     /// or when the owner left. The forum entry then lapses on its own.
     pub fn retire(&mut self, group: &Id) {
@@ -270,17 +377,20 @@ impl Listings {
     /// wins, the key moves to it on this device (and is dropped if the owner did
     /// not follow the child); the parent, if still public, then needs a key of
     /// its own via [`Listings::create`]. `forked_at` is the fork's effective
-    /// time as recorded by the caller; the snapshot does not keep it.
+    /// time is recorded in the snapshot. Every fork also schedules a rotation.
     pub fn fork(
         &mut self,
         snapshot: &Snapshot,
         (parent, child): (&Id, &Id),
-        (forked_at, wait): (u64, u64),
+        wait: u64,
         now: u64,
     ) -> Result<Keeper> {
         let p = snapshot.groups.get(parent).ok_or(Error::Invalid)?;
         let c = snapshot.groups.get(child).ok_or(Error::Invalid)?;
-        let decided = forked_at.saturating_add(wait);
+        let decided = c.created_at.saturating_add(wait);
+        if let Some(held) = self.held.get_mut(parent) {
+            held.fork_seen = held.fork_seen.max(c.created_at);
+        }
         if now < decided || c.members.len() <= p.members.len() {
             return Ok(Keeper::Parent);
         }

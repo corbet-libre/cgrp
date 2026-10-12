@@ -37,6 +37,7 @@ impl GroupState {
                 .iter()
                 .any(|m| m.is_empty() || m.len() > 200)
             || self.group.joins.len() > 100
+            || !crate::lifecycle::valid_listing_text(&self.group.name, &self.group.description)
             || self.group.band > 8
             || self.group.revision == 0
         {
@@ -103,7 +104,9 @@ impl Snapshot {
         let mut ids = match command {
             crate::Command::Create { .. } | crate::Command::Tick => vec![],
             crate::Command::Fork { parents, .. } => parents.clone(),
-            crate::Command::Join { group, .. } | crate::Command::Leave { group } => vec![*group],
+            crate::Command::Join { group, .. }
+            | crate::Command::Leave { group }
+            | crate::Command::Describe { group, .. } => vec![*group],
         };
         ids.sort();
         if ids.len() > 2 || ids.windows(2).any(|pair| pair[0] == pair[1]) {
