@@ -246,7 +246,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=listing#0c99c6952fcc4586619ac20f48a98af5c69117a1"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#0c99c6952fcc4586619ac20f48a98af5c69117a1"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
