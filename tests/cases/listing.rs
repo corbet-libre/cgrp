@@ -31,7 +31,7 @@ fn key_creation_requires_a_public_room_and_membership() {
     let s = room(43, false);
     let mut l = Listings::new(COMMUNITY, "m0");
     assert_eq!(l.room_id(&G), Err(Error::Authority));
-    assert_eq!(l.share(&G).unwrap_err(), Error::Authority);
+    assert_eq!(l.share(&G).err().unwrap(), Error::Authority);
     assert_eq!(l.create(&s, &[9; 32]), Err(Error::Invalid));
     assert_eq!(l.create(&s, &[2; 32]), Err(Error::Authority));
     assert_eq!(
@@ -87,7 +87,8 @@ fn entries_are_deterministic_monotone_and_bounded() {
     // A different description in the same window and revision cannot be signed.
     assert_eq!(
         l.sign_listing(&s, &G, "Hike", "Other", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Conflict
     );
     // A new window is strictly newer, and then older windows are refused.
@@ -97,59 +98,68 @@ fn entries_are_deterministic_monotone_and_bounded() {
     assert!(later.entry.counter > e.entry.counter);
     assert_eq!(
         l.sign_listing(&s, &G, "Hike", "Walks", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Conflict
     );
 
     // Bounds and authority.
     assert_eq!(
         l.sign_listing(&s, &G, &"n".repeat(65), "", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Capacity
     );
     assert_eq!(
         l.sign_listing(&s, &G, "n", &"d".repeat(513), NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Capacity
     );
     assert_eq!(
-        l.sign_listing(&s, &G, "n", "d", 1, false).unwrap_err(),
+        l.sign_listing(&s, &G, "n", "d", 1, false).err().unwrap(),
         Error::Clock
     );
     assert_eq!(
         l.sign_listing(&s, &G, "n", "d", 1 << 60, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Clock
     );
     assert_eq!(
         l.sign_listing(&Snapshot::empty("other".into()), &G, "n", "d", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
     assert_eq!(
         l.sign_listing(&s, &[9; 32], "n", "d", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Invalid
     );
     assert_eq!(
-        l.sign_listing(&s, &G, "n", "d", NOW, true).unwrap_err(),
+        l.sign_listing(&s, &G, "n", "d", NOW, true).err().unwrap(),
         Error::Authority
     );
     assert_eq!(
         l.sign_listing(&s, &[2; 32], "n", "d", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
     assert_eq!(
         Listings::new(COMMUNITY, "m99")
             .sign_listing(&s, &G, "n", "d", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
     assert_eq!(
         Listings::new(COMMUNITY, "m0")
             .sign_listing(&s, &G, "n", "d", NOW, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
 }
@@ -175,14 +185,16 @@ fn dropping_to_an_ingroup_allows_a_newer_tombstone_and_leavers_lose_the_key() {
     // The group is no longer public, so it cannot be listed again.
     assert_eq!(
         l.sign_listing(&dropped, &G, "Hike", "Walks", t, false)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
     // The leaver holds the key but may not sign; pruning wipes it.
     assert_eq!(
         leaver
             .sign_listing(&dropped, &G, "", "", t, true)
-            .unwrap_err(),
+            .err()
+            .unwrap(),
         Error::Authority
     );
     leaver.prune(&dropped);
@@ -239,15 +251,15 @@ fn shares_converge_on_the_lowest_key_and_persist() {
     let back = Listings::decode(COMMUNITY, "m0", &bytes).unwrap();
     assert_eq!(back.room_id(&G), a.room_id(&G));
     assert_eq!(
-        Listings::decode("other", "m0", &bytes).unwrap_err(),
+        Listings::decode("other", "m0", &bytes).err().unwrap(),
         Error::Authority
     );
     assert_eq!(
-        Listings::decode(COMMUNITY, "m7", &bytes).unwrap_err(),
+        Listings::decode(COMMUNITY, "m7", &bytes).err().unwrap(),
         Error::Authority
     );
     assert_eq!(
-        Listings::decode(COMMUNITY, "m0", &[1, 2, 3]).unwrap_err(),
+        Listings::decode(COMMUNITY, "m0", &[1, 2, 3]).err().unwrap(),
         Error::Invalid
     );
 }
