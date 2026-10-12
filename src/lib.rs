@@ -3,6 +3,7 @@
 
 mod activity;
 mod lifecycle;
+mod listing;
 mod policy;
 mod receipts;
 mod state;
@@ -10,6 +11,7 @@ mod suggestions;
 
 pub use activity::*;
 pub use lifecycle::*;
+pub use listing::*;
 pub use policy::*;
 pub use receipts::*;
 pub use state::*;
