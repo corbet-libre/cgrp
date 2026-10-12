@@ -15,6 +15,13 @@ cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt"]
 kind = "commands"
 commands = [["cargo", "deny", "--locked", "check", "advisories"]]
 
+# Original native owner tests, independently of the full cached gate.
+[checks.native]
+kind = "commands"
+commands = [["bash", ".ci/native.sh"]]
+cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["python3", "--version"]]
+cache_outputs = ["dependency-metadata.json"]
+
 [checks.resolve-dependencies]
 kind = "commands"
 commands = [["bash", ".ci/resolve-dependencies.sh"]]
@@ -33,6 +40,12 @@ command = ["bash", ".ci/run-cached.sh"]
 [jobs.resolve-dependencies]
 scheduler = "crow"
 checks = ["resolve-dependencies"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]
+
+[jobs.native]
+scheduler = "crow"
+checks = ["native"]
 workflow = "repository-jobs"
 command = ["bash", ".ci/run-cached.sh"]
 
