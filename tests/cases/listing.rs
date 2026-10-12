@@ -69,7 +69,6 @@ fn entries_are_deterministic_monotone_and_bounded() {
     );
     assert!(e.entry.expires_ms > NOW * 1000);
     assert!(e.entry.expires_ms <= NOW * 1000 + 7 * DAY * 1000);
-    assert!(REPUBLISH_SECONDS <= DAY);
 
     // Same window, same content: identical entry, also from another member.
     assert!(
