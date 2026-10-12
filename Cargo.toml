@@ -15,8 +15,14 @@ schemars = "1"
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01" }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+cmbl = { git = "https://git.corbet.ch/corbet-foss/cmbl.git", branch = "listing" }
+ed25519-dalek = "3"
+getrandom = "0.4"
+zeroize = "1"
 
 [dev-dependencies]
 futures = "0.3"
-ed25519-dalek = "3"
 wasm-bindgen-test = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
