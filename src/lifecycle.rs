@@ -182,6 +182,16 @@ impl Snapshot {
         Ok(snapshot)
     }
 
+    /// Store owner and key under which [`Self::load`] reads the checkpoint.
+    pub const STORE_OWNER: &'static str = "cgrp";
+    pub const STORE_KEY: &'static [u8] = b"snapshot.v1";
+
+    /// The canonical checkpoint bytes `load` accepts. Writing them is the
+    /// adapter's one version-fenced Store commit; this grants no authority.
+    pub fn checkpoint_bytes(&self) -> Result<Vec<u8>> {
+        postcard::to_allocvec(self).map_err(|_| Error::Invalid)
+    }
+
     pub fn empty(community: String) -> Self {
         Self {
             community,
