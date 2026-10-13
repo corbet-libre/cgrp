@@ -173,6 +173,7 @@ pub fn request(
             profile_visibility: visible,
             valid_until: now + DAY,
             key_package: vec![],
+            lineage_handle: vec![],
             signature: vec![],
             authority: vec![],
         };

@@ -48,6 +48,11 @@ pub struct SeatFormats {
     pub warning_days: u16,
 }
 
+/// Technical ceiling of a group's membership (2^8). The user-facing limit of a
+/// public room is 250 (`Policy::cap`); the six seats of cushion absorb joins in
+/// flight, pending leaves and fork overlaps. Hidden groups stay at `ingroup_max`.
+pub const MAX_MEMBERS: u16 = 256;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
@@ -85,7 +90,7 @@ impl Policy {
         if self.valid_until <= now || self.seats.enabled {
             return Err(Error::Policy);
         }
-        if self.cap > 100
+        if self.cap > MAX_MEMBERS
             || self.circle_max != 12
             || self.ingroup_max != 42
             || self.shrink_public != 36

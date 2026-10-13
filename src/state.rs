@@ -30,7 +30,7 @@ impl GroupState {
             || self.community.len() > 200
             || self.group.parents.len() > 2
             || self.group.parents.iter().collect::<BTreeSet<_>>().len() != self.group.parents.len()
-            || self.group.members.len() > 100
+            || self.group.members.len() > usize::from(crate::policy::MAX_MEMBERS)
             || self
                 .group
                 .members
