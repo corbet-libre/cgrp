@@ -179,6 +179,7 @@ pub fn request(
             command_digest: r.command_digest().unwrap(),
             profile_visibility: visible,
             valid_until: now + DAY,
+            key_package: vec![],
             signature: vec![],
             authority: vec![],
         };

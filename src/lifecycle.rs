@@ -62,6 +62,11 @@ pub struct Consent {
     pub command_digest: Id,
     pub profile_visibility: bool,
     pub valid_until: u64,
+    /// The consenting member's fresh MLS key package for the group this
+    /// command creates (empty for every other command). It is covered by the
+    /// signature, so nobody can swap in a package the member did not make.
+    #[serde(default)]
+    pub key_package: Vec<u8>,
     pub signature: Vec<u8>,
     pub authority: Vec<u8>,
 }
@@ -69,7 +74,7 @@ pub struct Consent {
 impl Consent {
     pub fn signing_bytes(&self) -> Result<Vec<u8>> {
         encode(&(
-            "cgrp.consent.v2",
+            "cgrp.consent.v3",
             &self.community,
             &self.member,
             self.operation,
@@ -77,6 +82,7 @@ impl Consent {
             self.command_digest,
             self.profile_visibility,
             self.valid_until,
+            &self.key_package,
         ))
     }
 }
@@ -989,4 +995,34 @@ pub fn history_allowed(joined_at: u64, message_at: u64, band: &Band) -> bool {
     band.history_seconds != 0
         && message_at <= joined_at
         && joined_at.saturating_sub(message_at) <= band.history_seconds.min(14 * DAY)
+}
+
+#[cfg(test)]
+mod consent_tests {
+    use super::*;
+
+    fn consent(package: &[u8]) -> Consent {
+        Consent {
+            community: "alpha".into(),
+            member: "m".repeat(96),
+            operation: [1; 32],
+            policy_epoch: 1,
+            command_digest: [2; 32],
+            profile_visibility: false,
+            valid_until: 10,
+            key_package: package.to_vec(),
+            signature: vec![],
+            authority: vec![],
+        }
+    }
+
+    #[test]
+    fn the_key_package_is_covered_by_the_signed_statement() {
+        let plain = consent(b"").signing_bytes().unwrap();
+        let with_package = consent(b"package").signing_bytes().unwrap();
+        let swapped = consent(b"other").signing_bytes().unwrap();
+        assert_ne!(plain, with_package);
+        assert_ne!(with_package, swapped);
+        assert_eq!(with_package, consent(b"package").signing_bytes().unwrap());
+    }
 }
