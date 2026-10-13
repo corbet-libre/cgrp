@@ -143,7 +143,7 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=v01#b3173c70644dacd8f5e9b1bd6478859fe03b4f03"
+source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=v01#7f3ec513671deaf31222caed7b54482919e3eb73"
 dependencies = [
  "blake3",
  "capnp",
@@ -222,7 +222,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ca1423d1d29466fdadd5f54dbf9b9afe17d02dd1"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ec22c5d74487eae685ec835a7c970d52b29aa487"
 dependencies = [
  "blake3",
  "cdht",
@@ -246,7 +246,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#1f35359af7c4874a8773ebc756579088f86131e1"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#86f3df5f2854a486802f30c1055f8fccbdfc8fd5"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
