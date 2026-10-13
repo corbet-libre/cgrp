@@ -66,7 +66,7 @@ fn consent_scope_revision_visibility_and_expiry_are_bound() {
     let edits: Vec<ConsentEdit> = vec![
         Box::new(|c| c.community = "foreign".into()),
         Box::new(|c| c.operation = [9; 32]),
-        Box::new(|c| c.expected_revision = 2),
+        Box::new(|c| c.signature.clear()),
         Box::new(|c| c.policy_epoch = 2),
         Box::new(|c| c.command_digest = [9; 32]),
         Box::new(|c| c.valid_until = 0),

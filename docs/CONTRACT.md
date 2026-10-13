@@ -12,10 +12,14 @@ Ingroup at 10; authenticated public seeds are exempt. No group admins or kicks.
 Joining, adding, merging, splitting and exclusion forks never cost Waves.
 Accounting grants belong to the accounting owners. Seat formats are disabled.
 
-Unresolved policy inputs: explicit band up/down transition vectors, split-fork
-privacy threshold, canonical exclusion-fork cost key. No default resolves these
-ambiguities. Anonymous room permits, verified restart/handover proofs and real
-MLS/Link integration are external capabilities, never accepting placeholders.
+Policy comes from authenticated settings. The canonical curve enters each band
+at its lower edge and leaves it two members below that edge (20 up, 18 down).
+A newly split public fork needs at least 43 members; the automatic shrink of an
+existing public room remains 36. Exclusion-fork cost is groups.fork_cost_sp (2
+seat points), dormant while seats.enabled is false. These policy values do not
+authorize a group or replace current signed policy and consent checks.
+Anonymous room permits, verified restart/handover proofs and real MLS/Link
+integration remain external capabilities, never accepting placeholders.
 
 ## Implemented API and integration limits
 
@@ -55,3 +59,39 @@ The canonical encrypted cwst record is owner `cgrp`, key `snapshot.v1`, with
 Postcard 1 serde encoding of `Snapshot`. JSON cannot encode this snapshot's
 binary map keys. Decode only authenticated device-storage records; arbitrary
 frontend bytes and a deserialized DTO are never membership authority.
+
+`Snapshot::load(community, &cwst::Store)` owns that canonical decode and refuses
+corrupt or foreign state; absence alone yields an initial empty view.
+`Candidate::revalidate(policy, authority, now)` repeats the original signed
+policy, every consent, required contact and seed authorization against fresh
+authority after asynchronous work. It retains the original request/base and
+command times; no opening, cooldown or join timestamp is extended. Exact policy
+changes or a timed opening transition invalidate pending publication. Threads
+invokes this method after custody checks and before the combined Store commit.
+
+Consent v2 binds the original operation, member, community, policy epoch,
+visibility, expiry and command digest. The command digest binds actor, complete
+command, sorted exact per-group parent commitments and the shared `effective_at`
+time. It never signs a device's local journal revision. Each candidate instead
+retains its complete local predecessor for the Store CAS. Commands change only
+their target; unrelated groups and nonmover parents remain intact. Tick owns
+local timed transitions. Per-group revisions advance only when that group changes.
+
+`GroupState` is a bounded versioned canonical encoding using the existing Groups
+encoder and Keys hash. `PreparedEffect::group_state()` binds it to genuine
+preparation. `Snapshot::group_state` and `parent_references` are metadata, never
+import capabilities. Old v1 consent and checkpoints without per-group revisions
+are refused; no signed-field rewriting or inferred migration is allowed.
+Threads binds the commitment in maintained MLS GroupContext. A newcomer still
+requires independently authenticated invitation/selected-room evidence plus
+verified MLS import; decoding GroupState cannot populate a local parent.
+
+`prepare_with_parents` admits only exact missing parents through the trusted
+`Authority::parent` port, whose default refuses. The application must supply
+fresh authenticated invitation and maintained MLS evidence for the original
+recipient and operation. Existing groups cannot be replaced. The private
+preparation view includes those parents, but the candidate retains the actual
+original checkpoint, replay state and CAS predecessor. Revalidation repeats
+parent authority alongside original consent, contact, seed and policy checks.
+No imported metadata is committed or exposed as membership/count authority
+before the original shared Groups/Threads transaction succeeds.

@@ -382,3 +382,23 @@ fn pending_work_cannot_outlive_signed_consent() {
         assert_eq!(store.revision, 0);
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn read_only_membership_interface_lists_groups_and_views() {
+    let s = ingroup(42);
+    let p = policy();
+    let ids: Vec<Id> = s.ids().copied().collect();
+    assert!(ids.contains(&[2; 32]));
+    let views = s.views(&p, 0).unwrap();
+    assert_eq!(views.len(), ids.len());
+    for (id, v) in ids.iter().zip(&views) {
+        assert_eq!(&v.id, id);
+        assert_eq!(v, &view(&s, id, &p, 0).unwrap());
+        assert_eq!(usize::from(v.size), s.members(id).unwrap().len());
+    }
+    let mut stale = policy();
+    stale.valid_until = 0;
+    assert_eq!(s.views(&stale, 0), Err(Error::Policy));
+    assert_eq!(Snapshot::empty("c".into()).views(&p, 0).unwrap(), vec![]);
+}

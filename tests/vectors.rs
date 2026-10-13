@@ -2,6 +2,12 @@
 mod adversarial;
 #[path = "cases/lifecycle.rs"]
 mod lifecycle;
+#[path = "cases/listing.rs"]
+mod listing;
 #[path = "cases/local.rs"]
 mod local;
+#[path = "cases/parents.rs"]
+mod parents;
+#[path = "cases/publication.rs"]
+mod publication;
 mod support;
