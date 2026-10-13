@@ -15,7 +15,7 @@ fn invalid_policy_never_becomes_authority() {
     let cases: Vec<PolicyEdit> = vec![
         Box::new(|p| p.valid_until = 0),
         Box::new(|p| p.seats.enabled = true),
-        Box::new(|p| p.cap = 101),
+        Box::new(|p| p.cap = 257),
         Box::new(|p| p.cap = 42),
         Box::new(|p| p.circle_max = 13),
         Box::new(|p| p.ingroup_max = 41),
@@ -42,6 +42,10 @@ fn invalid_policy_never_becomes_authority() {
         edit(&mut bad);
         assert_eq!(bad.validate(0), Err(Error::Policy));
     }
+    // The technical ceiling (2^8) is accepted; one more is refused above.
+    let mut ceiling = p.clone();
+    ceiling.cap = 256;
+    assert_eq!(ceiling.validate(0), Ok(()));
     assert_eq!(p.band(20, 9), Err(Error::Invalid));
     assert_eq!(p.band(0, 8).unwrap(), 0);
 }

@@ -67,6 +67,12 @@ pub struct Consent {
     /// signature, so nobody can swap in a package the member did not make.
     #[serde(default)]
     pub key_package: Vec<u8>,
+    /// The consenting member's OWN lineage-read handle: a locator only. Every
+    /// verifier reads the member's lineage through it and believes nothing but
+    /// the Charter-verified record bound to `member`. Covered by the signature,
+    /// so nobody can swap it on the way; empty when the consent needs no read.
+    #[serde(default)]
+    pub lineage_handle: Vec<u8>,
     pub signature: Vec<u8>,
     pub authority: Vec<u8>,
 }
@@ -74,7 +80,7 @@ pub struct Consent {
 impl Consent {
     pub fn signing_bytes(&self) -> Result<Vec<u8>> {
         encode(&(
-            "cgrp.consent.v3",
+            "cgrp.consent.v4",
             &self.community,
             &self.member,
             self.operation,
@@ -83,6 +89,7 @@ impl Consent {
             self.profile_visibility,
             self.valid_until,
             &self.key_package,
+            &self.lineage_handle,
         ))
     }
 }
@@ -1011,9 +1018,18 @@ mod consent_tests {
             profile_visibility: false,
             valid_until: 10,
             key_package: package.to_vec(),
+            lineage_handle: vec![],
             signature: vec![],
             authority: vec![],
         }
+    }
+
+    #[test]
+    fn the_lineage_handle_is_covered_by_the_signed_statement() {
+        let plain = consent(b"").signing_bytes().unwrap();
+        let mut with_handle = consent(b"");
+        with_handle.lineage_handle = b"handle".to_vec();
+        assert_ne!(plain, with_handle.signing_bytes().unwrap());
     }
 
     #[test]

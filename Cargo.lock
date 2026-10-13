@@ -143,7 +143,6 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=main#1485731a7ec541a04ad1fa4929e0ad31e26b7159"
 dependencies = [
  "blake3",
  "capnp",
@@ -222,7 +221,6 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#bccc59ea411cfc4deab7bd385d3da5866c2656a3"
 dependencies = [
  "blake3",
  "cdht",
@@ -246,7 +244,6 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#87995601f9e9373cd8d31777e6e40a6ef1f3024c"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -265,7 +262,6 @@ dependencies = [
 [[package]]
 name = "cmmr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#4e7a53703ccdf75a760af9ad6f4a4b9f429c952e"
 dependencies = [
  "serde",
 ]
@@ -400,7 +396,6 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#e15a512f2a304e149864dcd90c86aaa25441c604"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -1750,3 +1745,359 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "cvld"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "cvfy"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmty"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cbrd"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cbcn"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "clnk"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmeet"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cmeet-e2e"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpfl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cblv"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "ctrn"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cvch"
+version = "0.2.1"
+
+[[patch.unused]]
+name = "cprz"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-audio"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-blob"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-delta"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-image"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-pad"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-structured"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-text"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-video"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cwvs"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "csgn"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmbx"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cswb"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "crpt"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvln"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cgts"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cthl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "csrn"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cvlk"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cfrm"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmsg"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "cmsg-foyer-fixture"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cfyr"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cfyr-browser-tests"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "crgs"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpsd"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpsd-fuzz"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cblc"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cblc-private-accounting-fixture"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cnrl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvtl"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cmbr"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmsh"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cfbk"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cnvy"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cshm"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "ctnd"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cgrd"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cgth"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cnbx"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cfry"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cgbl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cthr"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cdlv"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "ckyh"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "crbk"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cwlt"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cwlt-engine"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpmt"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "clkp"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvlt"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cchr"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cxch"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "czkp"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cssr"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpky"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cphn"
+version = "0.1.1"
+
+[[patch.unused]]
+name = "ctcs"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cnvl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "csrh"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "crlt"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpns"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cplc"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "clbs"
+version = "0.0.0"
