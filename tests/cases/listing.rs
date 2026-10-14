@@ -56,7 +56,7 @@ fn named(state: &Snapshot, group: Id, at: u64) -> Snapshot {
 }
 
 fn public_room() -> Snapshot {
-    named(&room(43, false), G, 160_000)
+    named(&room(43), G, 160_000)
 }
 
 fn share_to(from: &Listings, snapshot: &Snapshot, to: &str) -> Listings {
@@ -76,7 +76,7 @@ fn drop_to_ingroup(mut s: Snapshot, mut t: u64) -> (Snapshot, u64) {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn name_and_description_are_ordered_group_state() {
-    let s = room(43, false);
+    let s = room(43);
     let before = s.group_state(&G).unwrap().revision();
     let d = named(&s, G, 160_000);
     assert_eq!(d.group_state(&G).unwrap().revision(), before + 1);
@@ -150,7 +150,7 @@ fn key_creation_requires_a_public_room_and_membership() {
     let public = l.create(&s, &G).unwrap();
     assert_eq!(l.create(&s, &G), Err(Error::Conflict));
     assert_eq!(l.room_id(&G).unwrap(), cmbl::listing::room_id(&public));
-    let seed = room(60, true);
+    let seed = room(60);
     assert!(Listings::new(COMMUNITY, "m5").create(&seed, &G).is_ok());
 }
 
@@ -193,7 +193,7 @@ fn entries_are_deterministic_monotone_and_bounded() {
     assert!(later.entry.counter > newer.entry.counter);
 
     // A room without a name cannot be listed.
-    let unnamed = room(43, false);
+    let unnamed = room(43);
     let mut u = Listings::new(COMMUNITY, "m0");
     u.create(&unnamed, &G).unwrap();
     assert_eq!(
@@ -391,7 +391,7 @@ fn a_departure_rotates_the_key_at_the_next_window_boundary() {
 }
 
 fn forked(parent_remaining_leavers: std::ops::Range<usize>) -> (Snapshot, u64) {
-    let s = named(&room(100, false), G, 360_000);
+    let s = named(&room(100), G, 360_000);
     let t0 = 400_000;
     let r = request(
         &s,

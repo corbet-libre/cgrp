@@ -18,9 +18,10 @@ fn invalid_policy_never_becomes_authority() {
         Box::new(|p| p.cap = 257),
         Box::new(|p| p.cap = 42),
         Box::new(|p| p.circle_max = 13),
-        Box::new(|p| p.ingroup_max = 41),
-        Box::new(|p| p.shrink_public = 37),
-        Box::new(|p| p.shrink_ingroup = 11),
+        Box::new(|p| p.circle_max = 2),
+        Box::new(|p| p.ingroup_max = 43),
+        Box::new(|p| p.shrink_public = 43),
+        Box::new(|p| p.shrink_ingroup = 12),
         Box::new(|p| p.split_public_min = 36),
         Box::new(|p| p.split_public_min = 44),
         Box::new(|p| p.seats.minimum = f64::NAN),
@@ -30,7 +31,7 @@ fn invalid_policy_never_becomes_authority() {
         Box::new(|p| p.seats.low = 61),
         Box::new(|p| p.modularity = 1.1),
         Box::new(|p| p.overlap = 1.1),
-        Box::new(|p| p.bands[0].lower = 4),
+        Box::new(|p| p.bands[0].lower = 2),
         Box::new(|p| p.bands[1].enter_up = 5),
         Box::new(|p| p.bands[2].leave_down = 9),
         Box::new(|p| p.bands[0].posts_per_hour = 0),
@@ -60,7 +61,6 @@ fn consent_scope_revision_visibility_and_expiry_are_bound() {
         Command::Create {
             id: [1; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),
@@ -101,39 +101,12 @@ fn consent_scope_revision_visibility_and_expiry_are_bound() {
         prepare(&s, &good, &SignedPolicy::new(&p), &TestAuthority, 0, 0),
         Err(Error::Capacity)
     ));
-    let r = request(
-        &s,
-        Command::Create {
-            id: [1; 32],
-            members: members(0, 3),
-            seed: true,
-        },
-        "m0",
-        members(0, 3),
-        false,
-        0,
-    );
-    rejected(&s, &r, &p, 0, Error::Authority);
-    let r = request(
-        &s,
-        Command::Create {
-            id: [255; 32],
-            members: members(0, 3),
-            seed: true,
-        },
-        "m0",
-        members(0, 3),
-        true,
-        0,
-    );
-    rejected(&s, &r, &p, 0, Error::Authority);
     let s = apply(&s, &good, 0).0;
     let r = request(
         &s,
         Command::Create {
             id: [1; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),
@@ -194,8 +167,7 @@ fn creations_and_private_joins_require_real_consent_and_vouches() {
             Command::Create {
                 id: [1; 32],
                 members: roster,
-                seed: false,
-            },
+                },
             actor,
             consenters,
             false,
@@ -209,7 +181,6 @@ fn creations_and_private_joins_require_real_consent_and_vouches() {
         Command::Create {
             id: [1; 32],
             members: roster.clone(),
-            seed: false,
         },
         "m0",
         roster,
@@ -289,7 +260,7 @@ fn creations_and_private_joins_require_real_consent_and_vouches() {
         0,
     );
     rejected(&s, &r, &p, 0, Error::Invalid);
-    let s = room(43, true);
+    let s = room(43);
     let r = request(
         &s,
         Command::Join {
@@ -486,7 +457,7 @@ fn malformed_forks_and_exclusion_retarget_boundaries() {
         0,
     );
     rejected(&s, &r, &p, 0, Error::Invalid);
-    let s = room(60, true);
+    let s = room(60);
     for n in [10, 38, 43] {
         let r = request(
             &s,
@@ -603,7 +574,7 @@ fn small_add_large_add_merge_and_opening_join_transitions() {
     );
     let s = apply(&s, &r, 0).0;
     assert_eq!(view(&s, &[4; 32], &p, 0).unwrap().level, Level::Opening);
-    let s = room(43, true);
+    let s = room(43);
     let r = request(
         &s,
         Command::Fork {
@@ -630,7 +601,6 @@ fn preparations_are_bound_and_projection_schemas_come_from_owner_types() {
         Command::Create {
             id: [1; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),

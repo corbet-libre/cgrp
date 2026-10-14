@@ -145,13 +145,6 @@ impl Authority for TestAuthority {
             Err(Error::Authority)
         }
     }
-    fn seed(&self, community: &str, group: &Id, _: u64) -> Result<()> {
-        if community == "test-community" && *group != [255; 32] {
-            Ok(())
-        } else {
-            Err(Error::Authority)
-        }
-    }
 }
 
 pub fn request(
@@ -261,7 +254,6 @@ pub fn circle(n: usize) -> Snapshot {
         Command::Create {
             id: [1; 32],
             members: members(0, n),
-            seed: false,
         },
         "m0",
         members(0, n),
@@ -287,23 +279,12 @@ pub fn ingroup(n: usize) -> Snapshot {
     );
     apply(&s, &r, 0).0
 }
-pub fn room(n: usize, seed: bool) -> Snapshot {
-    if seed {
-        let s = Snapshot::empty("test-community".into());
-        let r = request(
-            &s,
-            Command::Create {
-                id: [3; 32],
-                members: members(0, n),
-                seed,
-            },
-            "m0",
-            members(0, n),
-            true,
-            0,
-        );
-        return apply(&s, &r, 0).0;
-    }
+/// Joins below the first rate-limited band need no spacing; above it the
+/// hourly join limit forces them apart.
+fn join_time(i: usize) -> u64 {
+    (i.saturating_sub(59) as u64) * 3_600
+}
+pub fn room(n: usize) -> Snapshot {
     let mut s = ingroup(42);
     let r = request(
         &s,
@@ -330,9 +311,9 @@ pub fn room(n: usize, seed: bool) -> Snapshot {
             &format!("m{i}"),
             members(i, i + 1),
             true,
-            i as u64 * 3_600,
+            join_time(i),
         );
-        s = apply(&s, &r, i as u64 * 3_600).0;
+        s = apply(&s, &r, join_time(i)).0;
     }
     s
 }

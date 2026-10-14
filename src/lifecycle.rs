@@ -24,7 +24,6 @@ pub enum Command {
     Create {
         id: Id,
         members: BTreeSet<String>,
-        seed: bool,
     },
     Fork {
         id: Id,
@@ -48,6 +47,22 @@ pub enum Command {
         description: String,
     },
     Tick,
+}
+
+impl Command {
+    /// Whether this command takes effect in a public room, where joining is the
+    /// member's consent to be seen. Hidden groups (circles, in-groups) never
+    /// expose a profile, so their consents carry no such statement.
+    pub fn exposes_profile(&self) -> bool {
+        matches!(
+            self,
+            Command::Join { .. }
+                | Command::Fork {
+                    kind: ForkKind::Split | ForkKind::Open,
+                    ..
+                }
+        )
+    }
 }
 
 /// Exact statement signed by a currently authorized community device. Signature
@@ -99,7 +114,6 @@ pub trait Authority {
     /// authority and scope. No raw public key may become membership authority.
     fn consent(&self, consent: &Consent, now: u64) -> Result<()>;
     fn contact(&self, community: &str, member: &str, contact: &str, now: u64) -> Result<()>;
-    fn seed(&self, community: &str, group: &Id, now: u64) -> Result<()>;
     /// Authenticate this exact missing parent under the selected current Policy
     /// for the current local recipient
     /// and original operation. Decoded metadata alone never grants authority.
@@ -148,7 +162,6 @@ pub struct Group {
     pub(crate) parents: Vec<Id>,
     pub(crate) level: Level,
     pub(crate) members: BTreeSet<String>,
-    pub(crate) seed: bool,
     pub(crate) opened: Option<u64>,
     pub(crate) band: usize,
     pub(crate) joins: Vec<u64>,
@@ -362,7 +375,7 @@ impl Candidate {
         Ok(())
     }
 
-    /// Repeat the original consent, contact, seed and signed-policy checks at
+    /// Repeat the original consent, contact and signed-policy checks at
     /// publication time, after asynchronous custody work. Preparation is not a
     /// lease: revocation or a changed policy refuses the whole candidate.
     /// Original command times remain fixed, so waiting cannot reset an opening
@@ -471,7 +484,6 @@ pub enum NextChange {
     OpeningDeadline(u64),
     PrivateIngroup,
     PrivateCircle,
-    Seed,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
@@ -490,21 +502,19 @@ pub struct GroupView {
 pub fn view(state: &Snapshot, group: &Id, policy: &Policy, now: u64) -> Result<GroupView> {
     policy.validate(now)?;
     let g = state.groups.get(group).ok_or(Error::Invalid)?;
-    let (next_at, next) = if g.seed {
-        (policy.cap, NextChange::Seed)
-    } else {
+    let (next_at, next) = {
         match g.level {
-            Level::Circle => (13, NextChange::ConsentIngroup),
-            Level::Ingroup => (43, NextChange::ConsentPublic),
+            Level::Circle => (policy.circle_max + 1, NextChange::ConsentIngroup),
+            Level::Ingroup => (policy.ingroup_max + 1, NextChange::ConsentPublic),
             Level::Opening => (
-                43,
+                policy.ingroup_max + 1,
                 NextChange::OpeningDeadline(
                     g.opened
                         .ok_or(Error::Invalid)?
                         .saturating_add(policy.open_seconds),
                 ),
             ),
-            Level::Public => (36, NextChange::PrivateIngroup),
+            Level::Public => (policy.shrink_public, NextChange::PrivateIngroup),
         }
     };
     let size = g.members.len() as u16;
@@ -621,7 +631,7 @@ fn prepare_at(
         shrink(g, &policy, effective_at, &mut effects);
     }
     match &request.command {
-        Command::Create { id, members, seed } => {
+        Command::Create { id, members } => {
             validate_new(
                 &next,
                 id,
@@ -631,16 +641,11 @@ fn prepare_at(
                 max_groups,
                 &policy,
             )?;
-            if *seed {
-                authority.seed(&state.community, id, authorized_at)?;
-                visibility(request, members)?;
-            } else {
-                if members.len() > usize::from(policy.circle_max) {
-                    return Err(Error::Invalid);
-                }
-                for member in members.iter().filter(|m| **m != request.actor) {
-                    authority.contact(&state.community, &request.actor, member, authorized_at)?;
-                }
+            if members.len() > usize::from(policy.circle_max) {
+                return Err(Error::Invalid);
+            }
+            for member in members.iter().filter(|m| **m != request.actor) {
+                authority.contact(&state.community, &request.actor, member, authorized_at)?;
             }
             next.groups.insert(
                 *id,
@@ -651,9 +656,8 @@ fn prepare_at(
                     id: *id,
                     lineage: *id,
                     parents: vec![],
-                    level: if *seed { Level::Public } else { Level::Circle },
+                    level: Level::Circle,
                     members: members.clone(),
-                    seed: *seed,
                     opened: None,
                     band: 0,
                     joins: vec![],
@@ -790,7 +794,6 @@ fn prepare_at(
                     parents: parents.clone(),
                     level,
                     members: members.clone(),
-                    seed: false,
                     opened,
                     band: 0,
                     joins: vec![],
@@ -968,9 +971,6 @@ fn visibility(request: &Request, members: &BTreeSet<String>) -> Result<()> {
 }
 
 fn shrink(g: &mut Group, p: &Policy, now: u64, effects: &mut Vec<Effect>) {
-    if g.seed {
-        return;
-    }
     if g.level == Level::Opening
         && g.opened
             .is_some_and(|at| now.saturating_sub(at) >= p.open_seconds)

@@ -90,11 +90,14 @@ impl Policy {
         if self.valid_until <= now || self.seats.enabled {
             return Err(Error::Policy);
         }
+        // Growth thresholds are rulebook settings. Defaults are 12 / 42 / 36 / 10;
+        // the bounds keep the ordering and the privacy minimum (a circle holds
+        // at least three) so a test community may run small values.
         if self.cap > MAX_MEMBERS
-            || self.circle_max != 12
-            || self.ingroup_max != 42
-            || self.shrink_public != 36
-            || self.shrink_ingroup != 10
+            || !(3..=12).contains(&self.circle_max)
+            || !(self.circle_max + 1..=42).contains(&self.ingroup_max)
+            || !(self.circle_max + 1..=self.ingroup_max).contains(&self.shrink_public)
+            || !(2..self.circle_max).contains(&self.shrink_ingroup)
             || self.cap <= self.ingroup_max
             || !(self.shrink_public + 1..=self.ingroup_max + 1).contains(&self.split_public_min)
         {
@@ -121,9 +124,13 @@ impl Policy {
         {
             return Err(Error::Policy);
         }
-        let edges = [3, 6, 9, 13, 20, 30, 43, 60, 80];
-        for (i, band) in self.bands.iter().enumerate() {
-            if band.lower != edges[i]
+        let mut previous_lower = 0;
+        for band in self.bands.iter() {
+            let ordered = band.lower > previous_lower;
+            previous_lower = band.lower;
+            if !ordered
+                || band.lower < 3
+                || band.lower > self.cap
                 || band.enter_up < band.lower
                 || band.leave_down >= band.enter_up
                 || band.posts_per_hour == 0

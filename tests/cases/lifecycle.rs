@@ -14,7 +14,7 @@ fn privacy_forks_timeout_and_shrink() {
     let s = ingroup(42);
     assert_eq!(s.members(&[1; 32]).unwrap().len(), 12);
     assert_eq!(view(&s, &[2; 32], &p, 0).unwrap().level, Level::Ingroup);
-    let s = room(42, false);
+    let s = room(42);
     assert_eq!(view(&s, &[3; 32], &p, 0).unwrap().level, Level::Opening);
     let r = request(&s, Command::Tick, "m0", BTreeSet::new(), false, 21 * DAY);
     let (s, effects) = apply(&s, &r, 21 * DAY);
@@ -27,7 +27,7 @@ fn privacy_forks_timeout_and_shrink() {
         view(&s, &[3; 32], &p, 21 * DAY).unwrap().level,
         Level::Ingroup
     );
-    let mut s = room(43, false);
+    let mut s = room(43);
     assert_eq!(
         view(&s, &[3; 32], &p, 3 * DAY).unwrap().level,
         Level::Public
@@ -54,13 +54,6 @@ fn privacy_forks_timeout_and_shrink() {
             }
         );
     }
-    let s = room(3, true);
-    let r = request(&s, Command::Tick, "m0", BTreeSet::new(), false, 22 * DAY);
-    let s = apply(&s, &r, 22 * DAY).0;
-    assert_eq!(
-        view(&s, &[3; 32], &p, 22 * DAY).unwrap().next,
-        NextChange::Seed
-    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -72,7 +65,6 @@ fn consent_and_atomic_publication_refuse_replay_and_corruption() {
         Command::Create {
             id: [1; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),
@@ -210,7 +202,9 @@ fn exit_forks_preserve_nonmovers_and_cooldowns() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn cap_and_room_join_pacing() {
-    let mut s = room(80, true);
+    // After the last join the room's rooms were built with.
+    const LATER: u64 = 200 * 3_600;
+    let mut s = room(80);
     for i in 80..86 {
         let r = request(
             &s,
@@ -222,9 +216,9 @@ fn cap_and_room_join_pacing() {
             &format!("m{i}"),
             members(i, i + 1),
             true,
-            0,
+            LATER,
         );
-        s = apply(&s, &r, 0).0;
+        s = apply(&s, &r, LATER).0;
     }
     let r = request(
         &s,
@@ -236,7 +230,7 @@ fn cap_and_room_join_pacing() {
         "m86",
         members(86, 87),
         true,
-        0,
+        LATER,
     );
     assert!(matches!(
         prepare(
@@ -244,12 +238,12 @@ fn cap_and_room_join_pacing() {
             &r,
             &SignedPolicy::new(&policy()),
             &TestAuthority,
-            0,
+            LATER,
             128
         ),
         Err(Error::Capacity)
     ));
-    let s = room(100, true);
+    let s = room(100);
     let r = request(
         &s,
         Command::Join {
@@ -260,7 +254,7 @@ fn cap_and_room_join_pacing() {
         "m100",
         members(100, 101),
         true,
-        0,
+        LATER,
     );
     assert!(matches!(
         prepare(
@@ -268,7 +262,7 @@ fn cap_and_room_join_pacing() {
             &r,
             &SignedPolicy::new(&policy()),
             &TestAuthority,
-            0,
+            LATER,
             128
         ),
         Err(Error::Capacity)
@@ -291,7 +285,7 @@ fn inherited_opening_forks_preserve_deadline_and_visibility() {
             members(0, 41),
         ),
     ] {
-        let s = room(42, false);
+        let s = room(42);
         let command = Command::Fork {
             id: [4; 32],
             parents: vec![[3; 32]],
@@ -356,7 +350,6 @@ fn pending_work_cannot_outlive_signed_consent() {
         Command::Create {
             id: [1; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),
@@ -401,4 +394,28 @@ fn read_only_membership_interface_lists_groups_and_views() {
     stale.valid_until = 0;
     assert_eq!(s.views(&stale, 0), Err(Error::Policy));
     assert_eq!(Snapshot::empty("c".into()).views(&p, 0).unwrap(), vec![]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn growth_thresholds_are_settings_within_bounds() {
+    let mut small = policy();
+    small.circle_max = 3;
+    small.ingroup_max = 5;
+    small.shrink_public = 4;
+    small.shrink_ingroup = 2;
+    small.split_public_min = 6;
+    assert!(small.validate(0).is_ok());
+    let mut bad = small.clone();
+    bad.circle_max = 2;
+    assert!(bad.validate(0).is_err());
+    let mut bad = small.clone();
+    bad.ingroup_max = 43;
+    assert!(bad.validate(0).is_err());
+    let mut bad = small.clone();
+    bad.shrink_public = 3;
+    assert!(bad.validate(0).is_err());
+    let mut bad = small;
+    bad.cap = 257;
+    assert!(bad.validate(0).is_err());
 }
