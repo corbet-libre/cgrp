@@ -8,7 +8,7 @@ is never authority. State is checkpointed through device persistence before
 membership effects reach Threads.
 
 The launch cap is 100. Opening expires after 21 days. Public shrinks at 36 and
-Ingroup at 10; authenticated public seeds are exempt. No group admins or kicks.
+Ingroup at 10. No seed rooms and no group admins or kicks.
 Joining, adding, merging, splitting and exclusion forks never cost Waves.
 Accounting grants belong to the accounting owners. Seat formats are disabled.
 
@@ -63,7 +63,7 @@ frontend bytes and a deserialized DTO are never membership authority.
 `Snapshot::load(community, &cwst::Store)` owns that canonical decode and refuses
 corrupt or foreign state; absence alone yields an initial empty view.
 `Candidate::revalidate(policy, authority, now)` repeats the original signed
-policy, every consent, required contact and seed authorization against fresh
+policy, every consent and required contact authorization against fresh
 authority after asynchronous work. It retains the original request/base and
 command times; no opening, cooldown or join timestamp is extended. Exact policy
 changes or a timed opening transition invalidate pending publication. Threads
@@ -92,6 +92,6 @@ fresh authenticated invitation and maintained MLS evidence for the original
 recipient and operation. Existing groups cannot be replaced. The private
 preparation view includes those parents, but the candidate retains the actual
 original checkpoint, replay state and CAS predecessor. Revalidation repeats
-parent authority alongside original consent, contact, seed and policy checks.
+parent authority alongside original consent, contact and policy checks.
 No imported metadata is committed or exposed as membership/count authority
 before the original shared Groups/Threads transaction succeeds.

@@ -145,13 +145,6 @@ impl Authority for TestAuthority {
             Err(Error::Authority)
         }
     }
-    fn seed(&self, community: &str, group: &Id, _: u64) -> Result<()> {
-        if community == "test-community" && *group != [255; 32] {
-            Ok(())
-        } else {
-            Err(Error::Authority)
-        }
-    }
 }
 
 pub fn request(
@@ -260,7 +253,6 @@ pub fn circle(n: usize) -> Snapshot {
         Command::Create {
             id: [1; 32],
             members: members(0, n),
-            seed: false,
         },
         "m0",
         members(0, n),
@@ -286,23 +278,15 @@ pub fn ingroup(n: usize) -> Snapshot {
     );
     apply(&s, &r, 0).0
 }
-pub fn room(n: usize, seed: bool) -> Snapshot {
-    if seed {
-        let s = Snapshot::empty("test-community".into());
-        let r = request(
-            &s,
-            Command::Create {
-                id: [3; 32],
-                members: members(0, n),
-                seed,
-            },
-            "m0",
-            members(0, n),
-            true,
-            0,
-        );
-        return apply(&s, &r, 0).0;
-    }
+/// A public room of `n` members whose joins are paced one hour apart.
+pub fn room(n: usize) -> Snapshot {
+    grown(n, 3_600)
+}
+/// A public room of `n` members whose joins all happen at time zero (n <= 60).
+pub fn room_fast(n: usize) -> Snapshot {
+    grown(n, 0)
+}
+fn grown(n: usize, step: u64) -> Snapshot {
     let mut s = ingroup(42);
     let r = request(
         &s,
@@ -329,9 +313,9 @@ pub fn room(n: usize, seed: bool) -> Snapshot {
             &format!("m{i}"),
             members(i, i + 1),
             true,
-            i as u64 * 3_600,
+            i as u64 * step,
         );
-        s = apply(&s, &r, i as u64 * 3_600).0;
+        s = apply(&s, &r, i as u64 * step).0;
     }
     s
 }

@@ -14,7 +14,6 @@ fn identical_consent_uses_group_parent_not_local_journal_revision() {
         Command::Create {
             id: [9; 32],
             members: members(0, 3),
-            seed: false,
         },
         "m0",
         members(0, 3),
@@ -130,31 +129,23 @@ impl Authority for Revocation {
         }
         Ok(())
     }
-    fn seed(&self, community: &str, group: &Id, now: u64) -> Result<()> {
-        TestAuthority.seed(community, group, now)?;
-        if self.0 == 2 && now >= 11 {
-            return Err(Error::Authority);
-        }
-        Ok(())
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn current_consent_contacts_seed_and_exact_policy_are_required() {
+fn current_consent_contacts_and_exact_policy_are_required() {
     let base = Snapshot::empty("test-community".into());
     let source = SignedPolicy::new(&policy());
-    for kind in 0..3 {
+    for kind in 0..2 {
         let request = request(
             &base,
             Command::Create {
                 id: [1; 32],
                 members: members(0, 3),
-                seed: kind == 2,
             },
             "m0",
             members(0, 3),
-            kind == 2,
+            false,
             10,
         );
         let candidate = prepare(&base, &request, &source, &Revocation(kind), 10, 128).unwrap();
@@ -197,7 +188,7 @@ fn current_consent_contacts_seed_and_exact_policy_are_required() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pending_opening_cannot_publish_across_its_original_deadline() {
-    let base = room(42, false);
+    let base = room(42);
     let deadline = 21 * DAY;
     let request = request(
         &base,
