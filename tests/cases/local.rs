@@ -16,7 +16,7 @@ fn all_bands_history_and_weight() {
     assert_eq!(p.band(22, 3).unwrap(), 4);
     assert!((p.seat_weight(3) - 1.21).abs() < 1e-10);
     assert_eq!(p.seat_weight(60), 0.25);
-    assert_eq!(p.seat_weight(100), 3.25);
+    assert_eq!(p.seat_weight(250), 3.25);
     assert!(!history_allowed(20 * DAY, 19 * DAY, &p.bands[0]));
     assert!(history_allowed(20 * DAY, 19 * DAY, &p.bands[6]));
     assert!(!history_allowed(20 * DAY, 18 * DAY, &p.bands[6]));

@@ -2,6 +2,7 @@ use crate::support::*;
 use cgrp::*;
 use std::collections::BTreeSet;
 
+#[track_caller]
 fn rejected(s: &Snapshot, r: &Request, p: &Policy, now: u64, expected: Error) {
     assert!(
         matches!(prepare(s, r, &SignedPolicy::new(p), &TestAuthority, now, 128), Err(e) if e == expected)
@@ -26,7 +27,7 @@ fn invalid_policy_never_becomes_authority() {
         Box::new(|p| p.seats.minimum = f64::NAN),
         Box::new(|p| p.seats.large = -1.0),
         Box::new(|p| p.seats.low = 2),
-        Box::new(|p| p.seats.high = 100),
+        Box::new(|p| p.seats.high = 250),
         Box::new(|p| p.seats.low = 61),
         Box::new(|p| p.modularity = 1.1),
         Box::new(|p| p.overlap = 1.1),
@@ -94,7 +95,7 @@ fn consent_scope_revision_visibility_and_expiry_are_bound() {
     r.actor = "a".repeat(201);
     rejected(&s, &r, &p, 0, Error::Invalid);
     let mut r = good.clone();
-    r.consents = vec![r.consents[0].clone(); 101];
+    r.consents = vec![r.consents[0].clone(); usize::from(p.cap) + 1];
     rejected(&s, &r, &p, 0, Error::Invalid);
     assert!(matches!(
         prepare(&s, &good, &SignedPolicy::new(&p), &TestAuthority, 0, 0),
@@ -151,10 +152,10 @@ fn creations_and_private_joins_require_real_consent_and_vouches() {
         (members(0, 2), "m0", Error::Invalid),
         (members(1, 4), "m0", Error::Invalid),
         (members(0, 13), "m0", Error::Invalid),
-        (members(0, 101), "m0", Error::Capacity),
+        (members(0, usize::from(p.cap) + 1), "m0", Error::Capacity),
     ] {
-        let consenters = if roster.len() > 100 {
-            members(0, 100)
+        let consenters = if roster.len() > usize::from(p.cap) {
+            members(0, usize::from(p.cap))
         } else {
             roster
                 .union(&BTreeSet::from([actor.into()]))
