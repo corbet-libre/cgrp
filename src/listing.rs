@@ -74,7 +74,7 @@ impl Drop for Held {
 
 /// The private listing key of one group, for transfer to another member over
 /// the group's own encrypted channel only. Never log, store or show it.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListingShare {
     pub community: String,
     pub group: Id,
@@ -187,6 +187,25 @@ impl Listings {
 
     fn churn(&self, snapshot: &Snapshot, group: &Id) -> u64 {
         snapshot.groups.get(group).map_or(0, |g| g.churn_at)
+    }
+
+    /// Whether this device holds the listing key of `group`.
+    pub fn holds(&self, group: &Id) -> bool {
+        self.held.contains_key(group)
+    }
+
+    /// The public rooms of this snapshot that this device's owner belongs to:
+    /// the ones whose listing this device may create, share and publish.
+    pub fn public_groups(&self, snapshot: &Snapshot) -> Vec<Id> {
+        if snapshot.community != self.community {
+            return vec![];
+        }
+        snapshot
+            .groups
+            .iter()
+            .filter(|(_, g)| g.level == Level::Public && g.members.contains(&self.me))
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// The forum's opaque room identifier for this group; room-pass requests use it.
