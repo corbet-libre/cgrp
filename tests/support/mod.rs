@@ -27,7 +27,7 @@ pub fn policy() -> Policy {
     Policy {
         epoch: 1,
         valid_until: 1_000 * DAY,
-        cap: 100,
+        cap: 250,
         circle_max: 12,
         ingroup_max: 42,
         shrink_public: 36,

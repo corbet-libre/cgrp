@@ -49,6 +49,23 @@ pub enum Command {
     Tick,
 }
 
+impl Command {
+    /// Whether this command makes the signer visible to a public room. Decided
+    /// 2026-10-13: joining a public room (or opening a group to one) IS the
+    /// consent to visible profiles; there is no separate switch. Circles and
+    /// in-groups stay hidden, so every other command exposes nothing.
+    pub fn exposes_profile(&self) -> bool {
+        matches!(
+            self,
+            Command::Join { .. }
+                | Command::Fork {
+                    kind: ForkKind::Split | ForkKind::Open,
+                    ..
+                }
+        )
+    }
+}
+
 /// Exact statement signed by a currently authorized community device. Signature
 /// verification and current Guard/Contacts authority belong to the trusted port.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1022,5 +1039,32 @@ mod consent_tests {
         assert_ne!(plain, with_package);
         assert_ne!(with_package, swapped);
         assert_eq!(with_package, consent(b"package").signing_bytes().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod exposure_tests {
+    use super::*;
+
+    #[test]
+    fn only_joining_or_opening_to_a_public_room_exposes_a_profile() {
+        let join = Command::Join {
+            group: [1; 32],
+            member: "a".into(),
+            vouches: BTreeSet::new(),
+        };
+        assert!(join.exposes_profile());
+        let fork = |kind| Command::Fork {
+            id: [2; 32],
+            parents: vec![],
+            members: BTreeSet::new(),
+            kind,
+        };
+        assert!(fork(ForkKind::Open).exposes_profile());
+        assert!(fork(ForkKind::Split).exposes_profile());
+        assert!(!fork(ForkKind::Add).exposes_profile());
+        assert!(!fork(ForkKind::Merge).exposes_profile());
+        assert!(!Command::Leave { group: [1; 32] }.exposes_profile());
+        assert!(!Command::Tick.exposes_profile());
     }
 }

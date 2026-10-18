@@ -242,17 +242,19 @@ fn cap_and_room_join_pacing() {
         ),
         Err(Error::Capacity)
     ));
-    let s = room(100);
-    let t = 100 * 3_600;
+    // Decided 2026-10-13: user-facing limit 250 for a public room.
+    assert_eq!(policy().cap, 250);
+    let s = room(250);
+    let t = 250 * 3_600;
     let r = request(
         &s,
         Command::Join {
             group: [3; 32],
-            member: "m100".into(),
+            member: "m250".into(),
             vouches: BTreeSet::new(),
         },
-        "m100",
-        members(100, 101),
+        "m250",
+        members(250, 251),
         true,
         t,
     );

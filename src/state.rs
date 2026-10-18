@@ -36,7 +36,7 @@ impl GroupState {
                 .members
                 .iter()
                 .any(|m| m.is_empty() || m.len() > 200)
-            || self.group.joins.len() > 100
+            || self.group.joins.len() > usize::from(crate::policy::MAX_MEMBERS)
             || !crate::lifecycle::valid_listing_text(&self.group.name, &self.group.description)
             || self.group.band > 8
             || self.group.revision == 0
