@@ -52,6 +52,15 @@ pub struct SeatFormats {
 /// public room is 250 (`Policy::cap`); the six seats of cushion absorb joins in
 /// flight, pending leaves and fork overlaps. Hidden groups stay at `ingroup_max`.
 pub const MAX_MEMBERS: u16 = 256;
+/// Ceilings of the hidden layers (Dunbar): a circle has at most 12 members, a
+/// hidden in-group at most 42. They are also the default values of the settings
+/// `groups.circle_max` and `groups.ingroup_max`.
+pub const CIRCLE_CEILING: u16 = 12;
+pub const INGROUP_CEILING: u16 = 42;
+/// Smallest circle a policy may set, and the smallest size a shrunken in-group
+/// reverts at; below it a group is not a group.
+pub const MIN_CIRCLE: u16 = 3;
+pub const MIN_SHRINK: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -90,14 +99,7 @@ impl Policy {
         if self.valid_until <= now || self.seats.enabled {
             return Err(Error::Policy);
         }
-        if self.cap > MAX_MEMBERS
-            || self.circle_max != 12
-            || self.ingroup_max != 42
-            || self.shrink_public != 36
-            || self.shrink_ingroup != 10
-            || self.cap <= self.ingroup_max
-            || !(self.shrink_public + 1..=self.ingroup_max + 1).contains(&self.split_public_min)
-        {
+        if self.cap > MAX_MEMBERS || !self.thresholds_ordered() {
             return Err(Error::Policy);
         }
         let finite = [
@@ -134,6 +136,22 @@ impl Policy {
             }
         }
         Ok(())
+    }
+
+    /// The growth thresholds are rulebook settings, not code special cases: the
+    /// decided values are their defaults and their ceilings (the Dunbar layers),
+    /// smaller values let a test community walk the same ladder with few
+    /// members. Only the order that keeps the ladder meaningful is enforced:
+    /// every shrink threshold lies strictly below the size that grows into the
+    /// layer (hysteresis) and above the layer below it.
+    fn thresholds_ordered(&self) -> bool {
+        (MIN_CIRCLE..=CIRCLE_CEILING).contains(&self.circle_max)
+            && self.circle_max < self.ingroup_max
+            && self.ingroup_max <= INGROUP_CEILING
+            && (MIN_SHRINK..self.circle_max).contains(&self.shrink_ingroup)
+            && (self.circle_max + 1..self.ingroup_max).contains(&self.shrink_public)
+            && self.cap > self.ingroup_max
+            && (self.shrink_public + 1..=self.ingroup_max + 1).contains(&self.split_public_min)
     }
 
     pub fn band(&self, size: u16, previous: usize) -> Result<usize> {

@@ -19,9 +19,16 @@ fn invalid_policy_never_becomes_authority() {
         Box::new(|p| p.cap = 257),
         Box::new(|p| p.cap = 42),
         Box::new(|p| p.circle_max = 13),
+        Box::new(|p| p.circle_max = 2),
         Box::new(|p| p.ingroup_max = 41),
-        Box::new(|p| p.shrink_public = 37),
-        Box::new(|p| p.shrink_ingroup = 11),
+        Box::new(|p| p.ingroup_max = 43),
+        // The growth thresholds are settings within their bounds; what stays
+        // refused is any order that breaks the ladder or its hysteresis.
+        Box::new(|p| p.ingroup_max = 12),
+        Box::new(|p| p.shrink_public = 42),
+        Box::new(|p| p.shrink_public = 12),
+        Box::new(|p| p.shrink_ingroup = 12),
+        Box::new(|p| p.shrink_ingroup = 1),
         Box::new(|p| p.split_public_min = 36),
         Box::new(|p| p.split_public_min = 44),
         Box::new(|p| p.seats.minimum = f64::NAN),

@@ -504,17 +504,17 @@ pub fn view(state: &Snapshot, group: &Id, policy: &Policy, now: u64) -> Result<G
     policy.validate(now)?;
     let g = state.groups.get(group).ok_or(Error::Invalid)?;
     let (next_at, next) = match g.level {
-        Level::Circle => (13, NextChange::ConsentIngroup),
-        Level::Ingroup => (43, NextChange::ConsentPublic),
+        Level::Circle => (policy.circle_max + 1, NextChange::ConsentIngroup),
+        Level::Ingroup => (policy.ingroup_max + 1, NextChange::ConsentPublic),
         Level::Opening => (
-            43,
+            policy.ingroup_max + 1,
             NextChange::OpeningDeadline(
                 g.opened
                     .ok_or(Error::Invalid)?
                     .saturating_add(policy.open_seconds),
             ),
         ),
-        Level::Public => (36, NextChange::PrivateIngroup),
+        Level::Public => (policy.shrink_public, NextChange::PrivateIngroup),
     };
     let size = g.members.len() as u16;
     Ok(GroupView {
