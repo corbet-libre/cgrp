@@ -366,6 +366,13 @@ mod parents;
 pub use parents::prepare_with_parents;
 
 impl Candidate {
+    /// The signed request this candidate was prepared from (read-only). A room
+    /// leave relays exactly this request so another member can rebuild the
+    /// decision from the leaver's own signed consent.
+    pub fn request(&self) -> &Request {
+        &self.request
+    }
+
     /// Require the exact predecessor loaded from authenticated owner storage,
     /// not merely its numeric revision. A deserialized alternate snapshot with
     /// the same revision cannot replace membership, lineage or replay state.
