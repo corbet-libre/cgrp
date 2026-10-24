@@ -12,7 +12,7 @@ Use LGPL-compatible dependencies, semver ranges, and first-party Git branch main
 Keep one resolved revision per first-party crate in Cargo.lock. Never publish to
 registries. Plain English commits, no AI attribution or private operational data.
 
-No workstation Cargo, including fmt and metadata. GitHub Actions runs stable
+No local Cargo, including fmt and metadata. GitHub Actions runs stable
 format/clippy/native and actual wasm tests; nightly LLVM gates 100% reachable
 line and branch coverage. Do not lower gates or replace real logic with mocks.
-Expensive load tests use the established owned CI scheduler, never workstations.
+Expensive load tests use the established owned CI scheduler, never local machines.
