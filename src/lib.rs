@@ -8,7 +8,10 @@ mod policy;
 mod receipts;
 mod state;
 mod suggestions;
+mod visits;
 mod warm;
+
+pub use visits::*;
 
 pub use activity::*;
 pub use lifecycle::*;
