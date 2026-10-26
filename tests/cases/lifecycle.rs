@@ -107,7 +107,10 @@ fn growth_thresholds_are_settings_and_a_small_community_walks_the_ladder() {
     );
     let s = apply_with(&p, &empty, &create, 0);
     let v = view(&s, &[1; 32], &p, 0).unwrap();
-    assert_eq!((v.level, v.next_at, v.next), (Level::Circle, 5, NextChange::ConsentIngroup));
+    assert_eq!(
+        (v.level, v.next_at, v.next),
+        (Level::Circle, 5, NextChange::ConsentIngroup)
+    );
     // More than circle_max members is no circle.
     let too_big = request(
         &empty,
@@ -120,7 +123,17 @@ fn growth_thresholds_are_settings_and_a_small_community_walks_the_ladder() {
         false,
         0,
     );
-    assert!(prepare(&empty, &too_big, &SignedPolicy::new(&p), &TestAuthority, 0, 128).is_err());
+    assert!(
+        prepare(
+            &empty,
+            &too_big,
+            &SignedPolicy::new(&p),
+            &TestAuthority,
+            0,
+            128
+        )
+        .is_err()
+    );
 
     let add = request(
         &s,
@@ -137,7 +150,10 @@ fn growth_thresholds_are_settings_and_a_small_community_walks_the_ladder() {
     );
     let s = apply_with(&p, &s, &add, 0);
     let v = view(&s, &[2; 32], &p, 0).unwrap();
-    assert_eq!((v.level, v.next_at, v.next), (Level::Ingroup, 9, NextChange::ConsentPublic));
+    assert_eq!(
+        (v.level, v.next_at, v.next),
+        (Level::Ingroup, 9, NextChange::ConsentPublic)
+    );
 
     let open = request(
         &s,
@@ -170,7 +186,10 @@ fn growth_thresholds_are_settings_and_a_small_community_walks_the_ladder() {
         s = apply_with(&p, &s, &join, i as u64 * 3_600);
     }
     let v = view(&s, &[3; 32], &p, 3 * DAY).unwrap();
-    assert_eq!((v.level, v.next_at, v.next), (Level::Public, 6, NextChange::PrivateIngroup));
+    assert_eq!(
+        (v.level, v.next_at, v.next),
+        (Level::Public, 6, NextChange::PrivateIngroup)
+    );
     // Shrinking back follows shrink_public, then shrink_ingroup.
     for i in (3..9).rev() {
         let leave = request(
