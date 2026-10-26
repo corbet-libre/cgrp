@@ -8,6 +8,7 @@ mod policy;
 mod receipts;
 mod state;
 mod suggestions;
+mod warm;
 
 pub use activity::*;
 pub use lifecycle::*;
@@ -16,6 +17,7 @@ pub use policy::*;
 pub use receipts::*;
 pub use state::*;
 pub use suggestions::*;
+pub use warm::*;
 
 /// Bounded refusal codes never contain member data or upstream errors.
 #[derive(
