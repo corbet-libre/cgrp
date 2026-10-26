@@ -9,31 +9,32 @@
 //! module neither sends nor stores anything; the caller persists
 //! [`Listings::encode`] in the encrypted device store.
 //!
-//! The name and description are ordinary group state (`Command::Describe`), so
-//! the ordered result is what gets signed. After any departure or fork the key
-//! is rotated at the next window boundary ([`Listings::rotation_due`],
-//! [`Listings::rotate`]): the new key means a new room id, the old entry gets a
-//! tombstone and expires. Residual: an ex-member who still holds a valid room
-//! pass could keep a ghost entry alive until its lifetime ends.
+//! A listing entry is a projection of public state, valid exactly while the
+//! room is public by the warm count. Its expiry is the computed moment the
+//! warm count would fall below the public exit threshold ([`SHRINK_PUBLIC`], 36
+//! with hysteresis) if nobody came: with `N` warm ends sorted ascending,
+//! `ends[N-37]`. Equal ends fall out together. There is no TTL and no presence
+//! renewal; re-publication is only justified by a new accepted visit or group
+//! change, and the entry for a given projection is identical whoever signs it
+//! (ed25519 is deterministic), so concurrent re-publication never conflicts at
+//! the forum.
 //!
-//! Counters are derived, never chosen: `window << 32 | group revision`, where
-//! `window` counts [`LISTING_WINDOW`] spans of wall time. Every member who signs
-//! in the same window therefore produces the identical entry (ed25519 is
-//! deterministic), so concurrent re-publication never conflicts at the forum,
-//! while every ordered group change or new window yields a strictly newer entry.
-use crate::{DAY, Error, Group, Id, Level, Result, Snapshot, encode};
+//! After any departure or fork the key is rotated immediately as part of that
+//! fact: the old head is dead for live entries (only a tombstone withdrawing
+//! the superseded room may still be signed with it), so rotation and the head
+//! transition are inseparable. A stale share can neither be adopted fresh nor
+//! sign against the new head.
+//!
+//! Counters order entries for the forum's replace rule: the high 32 bits carry
+//! the expiry (or the fork-handover floor, which only ever orders), the low 32
+//! bits the group revision. A higher counter always replaces a lower one; an
+//! equal counter with different bytes is a conflict, never a merge.
+use crate::{DAY, Error, Group, Id, Level, Result, Snapshot, encode, warm::SHRINK_PUBLIC};
 use cmbl::listing::{Entry, SignedEntry};
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use zeroize::Zeroize;
-
-/// Entries are valid for two to four windows at most, well inside the forum's
-/// seven-day limit, and identical within one window.
-pub const LISTING_WINDOW: u64 = 2 * DAY;
-/// A public room is re-published at least this often so that the forum's
-/// volatile entry (default lifetime 24 hours) never lapses while it is public.
-pub const REPUBLISH_SECONDS: u64 = DAY;
 
 /// Which fork of a public room keeps the listing and its room identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,9 +46,10 @@ pub enum Keeper {
 #[derive(Clone, Serialize, Deserialize)]
 struct Held {
     secret: [u8; 32],
-    /// Lowest window this key may sign in; raised when the listing is handed to
-    /// a fork so the child's counters always exceed the parent's.
-    floor_window: u64,
+    /// Lowest counter-high this key may sign; raised when the listing moves to
+    /// a fork so the child's counters always exceed the parent's last one.
+    /// Orders only: the expiry a device signs stays its own truthful crossing.
+    floor_hi: u64,
     /// Rotations so far; a higher generation always replaces a lower one.
     generation: u32,
     /// Latest departure/fork time already covered by this key.
@@ -79,7 +81,7 @@ pub struct ListingShare {
     pub community: String,
     pub group: Id,
     secret: [u8; 32],
-    floor_window: u64,
+    floor_hi: u64,
     generation: u32,
     handled: u64,
 }
@@ -173,7 +175,7 @@ impl Listings {
         getrandom::fill(&mut secret).map_err(|_| Error::Unavailable)?;
         let held = Held {
             secret,
-            floor_window: 0,
+            floor_hi: 0,
             generation: 0,
             handled: self.churn(snapshot, group),
             fork_seen: 0,
@@ -221,7 +223,7 @@ impl Listings {
             community: self.community.clone(),
             group: *group,
             secret: held.secret,
-            floor_window: held.floor_window,
+            floor_hi: held.floor_hi,
             generation: held.generation,
             handled: held.handled,
         })
@@ -229,7 +231,9 @@ impl Listings {
 
     /// Accept a key received from a fellow member. The higher rotation
     /// generation wins; between equal generations (two members acting at the
-    /// same time) the numerically lowest public key wins on every device.
+    /// same time) the numerically lowest public key wins on every device. A
+    /// share that predates an already observed departure or fork is stale and
+    /// is refused: the old head is dead, and only the covering key may sign.
     pub fn adopt(&mut self, snapshot: &Snapshot, share: &ListingShare) -> Result<()> {
         if share.community != self.community {
             return Err(Error::Authority);
@@ -237,7 +241,7 @@ impl Listings {
         self.public_member(snapshot, &share.group)?;
         let incoming = Held {
             secret: share.secret,
-            floor_window: share.floor_window,
+            floor_hi: share.floor_hi,
             generation: share.generation,
             handled: share.handled,
             fork_seen: 0,
@@ -249,19 +253,43 @@ impl Listings {
         {
             return Ok(());
         }
+        if incoming.handled < self.churn(snapshot, &share.group) {
+            return Err(Error::Conflict);
+        }
         self.held.insert(share.group, incoming);
         Ok(())
     }
 
-    /// Sign the listing entry of a group. `now` is wall-clock seconds. Any member
-    /// holding the key may sign; the entry for a given window, group revision,
-    /// name and description is the same whoever signs it. A tombstone
-    /// (`withdrawn`) is allowed only once the group is no longer public.
+    /// The computed moment the warm count would fall below the public exit
+    /// threshold ([`SHRINK_PUBLIC`]) if nobody came: with the warm ends sorted
+    /// ascending, `ends[N-37]`. Equal ends fall out together; the half-open
+    /// interval means equality with an end is already expired.
+    fn crossing(warm_ends: &[u64]) -> Result<u64> {
+        let mut sorted = warm_ends.to_vec();
+        sorted.sort_unstable();
+        sorted
+            .len()
+            .checked_sub(SHRINK_PUBLIC as usize + 1)
+            .and_then(|at| sorted.get(at).copied())
+            .ok_or(Error::Invalid)
+    }
+
+    /// Sign the listing entry of a group: a projection of current public state,
+    /// valid exactly while the room is public by the warm count. `warm_ends`
+    /// carries one warm end (wall-clock seconds) per currently warm seat; the
+    /// entry expires at the computed crossing if nobody came. `now` is
+    /// wall-clock seconds. Any member holding the key may sign; the entry for a
+    /// given projection, group revision, name and description is the same
+    /// whoever signs it, so no renewal loop is ever needed. A tombstone
+    /// (`withdrawn`) is allowed only once the group is no longer public; it
+    /// needs no warm projection, and a stale key may only withdraw, never
+    /// extend the superseded head.
     pub fn sign_listing(
         &mut self,
         snapshot: &Snapshot,
         group: &Id,
         now: u64,
+        warm_ends: &[u64],
         withdrawn: bool,
     ) -> Result<SignedEntry> {
         if now < snapshot.now {
@@ -278,10 +306,35 @@ impl Listings {
         if !withdrawn && name.trim().is_empty() {
             return Err(Error::Invalid);
         }
+        let trigger = self.churn(snapshot, group);
         let held = self.held.get_mut(group).ok_or(Error::Authority)?;
-        let window = (now / LISTING_WINDOW).max(held.floor_window);
-        let counter = (u64::from(u32::try_from(window).map_err(|_| Error::Clock)?) << 32)
-            | u64::from(u32::try_from(revision).unwrap_or(u32::MAX));
+        if !withdrawn && trigger.max(held.fork_seen) > held.handled {
+            return Err(Error::Conflict);
+        }
+        let (counter, expires_ms) = if withdrawn {
+            let high = match held.last {
+                Some((last, _)) => last.saturating_add(1 << 32),
+                None => (u32::try_from(now).map_err(|_| Error::Clock)? as u64) << 32,
+            };
+            let expires_ms = now
+                .checked_mul(1_000)
+                .and_then(|ms| ms.checked_add(DAY * 1_000))
+                .ok_or(Error::Clock)?;
+            (high, expires_ms)
+        } else {
+            if warm_ends.len() > g.members.len()
+                || warm_ends.len() < SHRINK_PUBLIC as usize + 1
+                || warm_ends.iter().any(|end| *end <= now)
+            {
+                return Err(Error::Invalid);
+            }
+            let crossing = Self::crossing(warm_ends)?;
+            let expiry_hi = u32::try_from(crossing).map_err(|_| Error::Clock)? as u64;
+            let counter = (expiry_hi.max(held.floor_hi) << 32)
+                | u64::from(u32::try_from(revision).unwrap_or(u32::MAX));
+            let expires_ms = crossing.saturating_mul(1_000);
+            (counter, expires_ms)
+        };
         let digest = *ckmg::hash(&encode(&(withdrawn, name, description))?).value();
         if let Some((last, last_digest)) = &held.last
             && (counter < *last || (counter == *last && digest != *last_digest))
@@ -294,10 +347,7 @@ impl Listings {
             name: name.into(),
             description: description.into(),
             counter,
-            expires_ms: window
-                .saturating_add(2)
-                .saturating_mul(LISTING_WINDOW)
-                .saturating_mul(1_000),
+            expires_ms,
             withdrawn,
         };
         let signed = SignedEntry::sign(entry, &key).map_err(|_| Error::Invalid)?;
@@ -306,30 +356,38 @@ impl Listings {
     }
 
     /// Whether the key must be rotated now: a departure or fork happened after
-    /// the key was created and the next window boundary has passed.
-    pub fn rotation_due(&self, snapshot: &Snapshot, group: &Id, now: u64) -> bool {
+    /// this key last covered one. Rotation is immediate, with no window wait:
+    /// it is an inseparable part of the departure/fork fact.
+    pub fn rotation_due(&self, snapshot: &Snapshot, group: &Id) -> bool {
         let Some(held) = self.held.get(group) else {
             return false;
         };
-        let trigger = self.churn(snapshot, group).max(held.fork_seen);
-        trigger > held.handled && now >= (trigger / LISTING_WINDOW + 1) * LISTING_WINDOW
+        self.churn(snapshot, group).max(held.fork_seen) > held.handled
     }
 
     /// Replace the key of a public room: sign a tombstone with the old key and
     /// create the next generation. The caller sends `share` to the other
-    /// members, publishes the tombstone under the old room and requests passes
-    /// under the new room id. Batching comes from [`Listings::rotation_due`].
+    /// members and publishes the tombstone under the old room. Rotation is due
+    /// immediately on any departure or fork, as part of that fact.
     pub fn rotate(&mut self, snapshot: &Snapshot, group: &Id, now: u64) -> Result<Rotation> {
-        if !self.rotation_due(snapshot, group, now) {
+        if !self.rotation_due(snapshot, group) {
             return Err(Error::Conflict);
         }
         let g = self.public_member_group(snapshot, group)?;
         let (revision, name, description) = (g.revision, g.name.clone(), g.description.clone());
-        let churn = self.churn(snapshot, group);
+        let handled = self
+            .churn(snapshot, group)
+            .max(self.held.get(group).map(|held| held.fork_seen).unwrap_or(0));
         let old = self.held.get(group).ok_or(Error::Authority)?;
-        let window = (now / LISTING_WINDOW).max(old.floor_window) + 1;
-        let counter = (u64::from(u32::try_from(window).map_err(|_| Error::Clock)?) << 32)
-            | u64::from(u32::try_from(revision).unwrap_or(u32::MAX));
+        let counter = match old.last {
+            Some((last, _)) => last.saturating_add(1 << 32),
+            None => (u32::try_from(now).map_err(|_| Error::Clock)? as u64) << 32,
+        };
+        let expires_ms = now
+            .checked_mul(1_000)
+            .and_then(|ms| ms.checked_add(DAY * 1_000))
+            .ok_or(Error::Clock)?;
+        let counter = counter | u64::from(u32::try_from(revision).unwrap_or(u32::MAX));
         let key = SigningKey::from_bytes(&old.secret);
         let tombstone = SignedEntry::sign(
             Entry {
@@ -337,9 +395,7 @@ impl Listings {
                 name,
                 description,
                 counter,
-                expires_ms: (window + 2)
-                    .saturating_mul(LISTING_WINDOW)
-                    .saturating_mul(1_000),
+                expires_ms,
                 withdrawn: true,
             },
             &key,
@@ -349,9 +405,9 @@ impl Listings {
         getrandom::fill(&mut secret).map_err(|_| Error::Unavailable)?;
         let next = Held {
             secret,
-            floor_window: 0,
+            floor_hi: 0,
             generation: old.generation.saturating_add(1),
-            handled: churn.max(old.fork_seen),
+            handled,
             fork_seen: 0,
             last: None,
         };
@@ -360,7 +416,7 @@ impl Listings {
             community: self.community.clone(),
             group: *group,
             secret: next.secret,
-            floor_window: 0,
+            floor_hi: 0,
             generation: next.generation,
             handled: next.handled,
         };
@@ -391,12 +447,14 @@ impl Listings {
     }
 
     /// Decide which fork of a public room keeps the listing. Until `wait`
-    /// seconds after `forked_at` the parent keeps it; afterwards the fork with
-    /// more members does, and a tie goes to the older parent. When the child
-    /// wins, the key moves to it on this device (and is dropped if the owner did
-    /// not follow the child); the parent, if still public, then needs a key of
-    /// its own via [`Listings::create`]. `forked_at` is the fork's effective
-    /// time is recorded in the snapshot. Every fork also schedules a rotation.
+    /// seconds after the fork's effective time (recorded in the snapshot) the
+    /// parent keeps it; afterwards the fork with more members does, and a tie
+    /// goes to the older parent. When the child wins, the key moves to it on
+    /// this device (and is dropped if the owner did not follow the child); the
+    /// handover resolves the fork for the moved key, ordering its first
+    /// counters above the parent's last while keeping its own truthful expiry.
+    /// The parent, if still public, then needs a key of its own via
+    /// [`Listings::create`]. Every fork schedules an immediate rotation.
     pub fn fork(
         &mut self,
         snapshot: &Snapshot,
@@ -416,7 +474,13 @@ impl Listings {
         if let Some(mut held) = self.held.remove(parent)
             && c.members.contains(&self.me)
         {
-            held.floor_window = held.floor_window.max(decided / LISTING_WINDOW + 1);
+            held.floor_hi = held
+                .floor_hi
+                .max(held.last.map(|(last, _)| last >> 32).unwrap_or(0))
+                .saturating_add(1)
+                .min(u32::MAX as u64);
+            held.handled = held.handled.max(held.fork_seen);
+            held.fork_seen = 0;
             self.held.insert(*child, held);
         }
         Ok(Keeper::Child)

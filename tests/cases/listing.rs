@@ -156,88 +156,169 @@ fn key_creation_requires_a_public_room_and_membership() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn public_room_with_thirty_seven_warm_seats_stays_listed_overnight() {
+    // A public room with 37 warm seats is still public by the warm count, so it
+    // stays listed even with nobody live (here-now 0): publication takes no
+    // presence input at all.
+    let s = public_room();
+    let mut l = Listings::new(COMMUNITY, "m0");
+    let public = l.create(&s, &G).unwrap();
+    let now = 2 * DAY + 2 * 3_600;
+    let ends = ends_from(now, 37);
+    let e = l.sign_listing(&s, &G, now, &ends, false).unwrap();
+    assert!(!e.entry.withdrawn);
+    assert_eq!(e.entry.key, public);
+    // N = 37: the crossing is the first warm end.
+    assert_eq!(e.entry.expires_ms, ends[0] * 1_000);
+    assert!(e.entry.expires_ms > now * 1_000);
+    // Same projection from another member, later at night: the identical entry.
+    // Publication time and liveness change nothing; no renewal is necessary.
+    let mut other = share_to(&l, &s, "m1");
+    assert!(
+        other
+            .sign_listing(&s, &G, now + 3_600, &ends, false)
+            .unwrap()
+            == e
+    );
+    // At 36 warm seats the room is no longer public by the warm count, even
+    // though the stored level still says Public: no live entry may be signed.
+    assert_eq!(
+        l.sign_listing(&s, &G, now, &ends_from(now, 36), false)
+            .err()
+            .unwrap(),
+        Error::Invalid
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn listing_expiry_is_the_computed_warm_count_crossing() {
+    // The expiry is the moment the warm count would fall below 36 (hysteresis)
+    // if nobody came: with N warm ends sorted ascending, ends[N-37].
+    let s = public_room();
+    let mut l = Listings::new(COMMUNITY, "m0");
+    l.create(&s, &G).unwrap();
+    let ends = ends_from(NOW, 43);
+    let e = l.sign_listing(&s, &G, NOW, &ends, false).unwrap();
+    assert_eq!(e.entry.counter >> 32, ends[6]);
+    assert_eq!(e.entry.expires_ms, ends[6] * 1_000);
+    // Input order changes nothing: equal ends fall out together.
+    let mut shuffled = ends.clone();
+    shuffled.reverse();
+    assert!(l.sign_listing(&s, &G, NOW, &shuffled, false).unwrap() == e);
+    let flat = vec![NOW + 9 * DAY; 43];
+    let f = l.sign_listing(&s, &G, NOW, &flat, false).unwrap();
+    assert_eq!(f.entry.expires_ms, (NOW + 9 * DAY) * 1_000);
+    // A later crossing is a strictly newer counter for the forum's replace rule.
+    assert!(e.entry.counter < f.entry.counter);
+    // A projection that is not warm (a cooled end) or oversized is refused.
+    let mut stale = ends.clone();
+    stale[0] = NOW;
+    assert_eq!(
+        l.sign_listing(&s, &G, NOW, &stale, false).err().unwrap(),
+        Error::Invalid
+    );
+    assert_eq!(
+        l.sign_listing(&s, &G, NOW, &ends_from(NOW, 44), false)
+            .err()
+            .unwrap(),
+        Error::Invalid
+    );
+}
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn entries_are_deterministic_monotone_and_bounded() {
     let s = public_room();
     let mut l = Listings::new(COMMUNITY, "m0");
     let public = l.create(&s, &G).unwrap();
     let revision = s.group_state(&G).unwrap().revision();
-    let e = l.sign_listing(&s, &G, NOW, false).unwrap();
+    let ends = ends_from(NOW, 43);
+    let e = l.sign_listing(&s, &G, NOW, &ends, false).unwrap();
     assert_eq!(e.entry.key, public);
     assert_eq!(e.entry.name, "Hike");
     assert_eq!(e.entry.description, "Weekend walks");
     assert_eq!(e.room(), l.room_id(&G).unwrap());
     assert!(!e.entry.withdrawn);
-    assert_eq!(e.entry.counter, ((NOW / LISTING_WINDOW) << 32) | revision);
-    assert_eq!(
-        e.entry.expires_ms,
-        (NOW / LISTING_WINDOW + 2) * LISTING_WINDOW * 1000
-    );
-    assert!(e.entry.expires_ms > NOW * 1000);
-    assert!(e.entry.expires_ms <= NOW * 1000 + 7 * DAY * 1000);
+    assert_eq!(e.entry.counter, (ends[6] << 32) | revision);
+    assert_eq!(e.entry.expires_ms, ends[6] * 1_000);
+    assert!(e.entry.expires_ms > NOW * 1_000);
+    // The crossing is one of the supplied ends: bounded by the projection.
+    assert!(ends.contains(&(e.entry.expires_ms / 1_000)));
 
-    // Same window, same content: identical entry, also from another member.
-    assert!(e == l.sign_listing(&s, &G, NOW + 3_600, false).unwrap());
+    // Same projection, same revision: identical entry, also from another
+    // member and at a later publication time. No renewal loop is needed.
+    assert!(l.sign_listing(&s, &G, NOW + 3_600, &ends, false).unwrap() == e);
     let mut other = share_to(&l, &s, "m1");
-    assert!(e == other.sign_listing(&s, &G, NOW + 7_200, false).unwrap());
+    assert!(
+        other
+            .sign_listing(&s, &G, NOW + 7_200, &ends, false)
+            .unwrap()
+            == e
+    );
 
-    // A different text in the same window needs a new revision, which is newer.
+    // A different text needs a new revision, whose counter is strictly newer;
+    // re-signing the old revision afterwards is a monotone conflict.
     let d = try_describe(&s, G, "m0", ("Hike", "Other"), 400_000).unwrap();
-    let newer = l.sign_listing(&d, &G, NOW, false).unwrap();
+    let newer = l.sign_listing(&d, &G, NOW, &ends, false).unwrap();
     assert!(newer.entry.counter > e.entry.counter);
     assert_eq!(
-        l.sign_listing(&s, &G, NOW, false).err().unwrap(),
+        l.sign_listing(&s, &G, NOW, &ends, false).err().unwrap(),
         Error::Conflict
     );
-    // A new window is strictly newer too.
-    let later = l.sign_listing(&d, &G, NOW + LISTING_WINDOW, false).unwrap();
-    assert!(later.entry.counter > newer.entry.counter);
 
     // A room without a name cannot be listed.
     let unnamed = room(43);
     let mut u = Listings::new(COMMUNITY, "m0");
     u.create(&unnamed, &G).unwrap();
     assert_eq!(
-        u.sign_listing(&unnamed, &G, NOW, false).err().unwrap(),
+        u.sign_listing(&unnamed, &G, NOW, &ends, false)
+            .err()
+            .unwrap(),
         Error::Invalid
     );
 
     // Bounds and authority.
     assert_eq!(
-        l.sign_listing(&s, &G, 1, false).err().unwrap(),
+        l.sign_listing(&s, &G, 1, &ends, false).err().unwrap(),
+        Error::Clock
+    );
+    let huge = vec![u64::MAX; 43];
+    assert_eq!(
+        l.sign_listing(&s, &G, NOW, &huge, false).err().unwrap(),
         Error::Clock
     );
     assert_eq!(
-        l.sign_listing(&s, &G, 1 << 60, false).err().unwrap(),
-        Error::Clock
-    );
-    assert_eq!(
-        l.sign_listing(&Snapshot::empty("other".into()), &G, NOW, false)
+        l.sign_listing(&Snapshot::empty("other".into()), &G, NOW, &ends, false)
             .err()
             .unwrap(),
         Error::Authority
     );
     assert_eq!(
-        l.sign_listing(&s, &[9; 32], NOW, false).err().unwrap(),
+        l.sign_listing(&s, &[9; 32], NOW, &ends, false)
+            .err()
+            .unwrap(),
         Error::Invalid
     );
     assert_eq!(
-        l.sign_listing(&s, &G, NOW, true).err().unwrap(),
+        l.sign_listing(&s, &G, NOW, &ends, true).err().unwrap(),
         Error::Authority
     );
     assert_eq!(
-        l.sign_listing(&s, &[2; 32], NOW, false).err().unwrap(),
+        l.sign_listing(&s, &[2; 32], NOW, &ends, false)
+            .err()
+            .unwrap(),
         Error::Authority
     );
     assert_eq!(
         Listings::new(COMMUNITY, "m99")
-            .sign_listing(&s, &G, NOW, false)
+            .sign_listing(&s, &G, NOW, &ends, false)
             .err()
             .unwrap(),
         Error::Authority
     );
     assert_eq!(
         Listings::new(COMMUNITY, "m0")
-            .sign_listing(&s, &G, NOW, false)
+            .sign_listing(&s, &G, NOW, &ends, false)
             .err()
             .unwrap(),
         Error::Authority
@@ -251,20 +332,29 @@ fn dropping_to_an_ingroup_allows_a_newer_tombstone_and_leavers_lose_the_key() {
     let mut l = Listings::new(COMMUNITY, "m0");
     l.create(&s, &G).unwrap();
     let mut leaver = share_to(&l, &s, "m42");
-    let live = l.sign_listing(&s, &G, NOW, false).unwrap();
+    let live = l
+        .sign_listing(&s, &G, NOW, &ends_from(NOW, 43), false)
+        .unwrap();
     let (dropped, t) = drop_to_ingroup(s.clone(), NOW);
-    let tomb = l.sign_listing(&dropped, &G, t, true).unwrap();
+    // A stale key may only withdraw the superseded head, never extend it; the
+    // tombstone needs no warm projection of its own.
+    let tomb = l.sign_listing(&dropped, &G, t, &[], true).unwrap();
     assert!(tomb.entry.withdrawn);
     assert!(tomb.entry.counter > live.entry.counter);
     assert_eq!(tomb.room(), live.room());
     // The group is no longer public, so it cannot be listed again.
     assert_eq!(
-        l.sign_listing(&dropped, &G, t, false).err().unwrap(),
+        l.sign_listing(&dropped, &G, t, &ends_from(t, 37), false)
+            .err()
+            .unwrap(),
         Error::Authority
     );
     // The leaver holds the key but may not sign; pruning wipes it.
     assert_eq!(
-        leaver.sign_listing(&dropped, &G, t, true).err().unwrap(),
+        leaver
+            .sign_listing(&dropped, &G, t, &[], true)
+            .err()
+            .unwrap(),
         Error::Authority
     );
     leaver.prune(&dropped);
@@ -282,6 +372,13 @@ fn leaver_source(s: &Snapshot) -> Listings {
     let mut l = Listings::new(COMMUNITY, "m0");
     l.create(s, &G).unwrap();
     l
+}
+
+/// Warm-end projection for `n` currently-warm seats: one end per warm seat,
+/// all strictly after `now`, staggered one day apart. No presence input: a
+/// listing never depends on who is live right now.
+fn ends_from(now: u64, n: usize) -> Vec<u64> {
+    (1..=n as u64).map(|i| now + i * DAY).collect()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -331,63 +428,114 @@ fn shares_converge_on_the_lowest_key_and_persist() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn a_departure_rotates_the_key_at_the_next_window_boundary() {
+fn a_departure_rotates_the_key_immediately() {
     let s = public_room();
     let mut l = Listings::new(COMMUNITY, "m0");
     l.create(&s, &G).unwrap();
     let old_room = l.room_id(&G).unwrap();
-    let live = l.sign_listing(&s, &G, NOW, false).unwrap();
-    assert!(!l.rotation_due(&s, &G, NOW));
-    assert!(!Listings::new(COMMUNITY, "m0").rotation_due(&s, &G, NOW));
+    let live = l
+        .sign_listing(&s, &G, NOW, &ends_from(NOW, 43), false)
+        .unwrap();
+    assert!(!l.rotation_due(&s, &G));
+    assert!(!Listings::new(COMMUNITY, "m0").rotation_due(&s, &G));
 
-    // m42 leaves; rotation waits for the next window boundary (batching).
+    // m42 leaves: rotation is due at the departure itself, with no window wait.
     let left_at = NOW + 10;
     let after = leave(&s, G, "m42", left_at);
-    let boundary = (left_at / LISTING_WINDOW + 1) * LISTING_WINDOW;
-    assert!(!l.rotation_due(&after, &G, boundary - 1));
-    assert_eq!(
-        l.rotate(&after, &G, boundary - 1).err().unwrap(),
-        Error::Conflict
-    );
-    assert!(l.rotation_due(&after, &G, boundary));
-    let mut peer = share_to(&l, &after, "m1");
-    let r = l.rotate(&after, &G, boundary).unwrap();
+    assert!(l.rotation_due(&after, &G));
+    let mut peer = share_to(&l, &s, "m1");
+    let r = l.rotate(&after, &G, left_at).unwrap();
     assert!(r.tombstone.entry.withdrawn);
     assert_eq!(r.tombstone.room(), old_room);
     assert!(r.tombstone.entry.counter > live.entry.counter);
     assert_ne!(r.room, old_room);
     assert_eq!(l.room_id(&G).unwrap(), r.room);
-    assert!(!l.rotation_due(&after, &G, boundary + 1));
+    assert!(!l.rotation_due(&after, &G));
+
+    // The new key signs the post-departure projection under the new head.
+    let ends42 = ends_from(left_at, 42);
+    let e = l.sign_listing(&after, &G, left_at, &ends42, false).unwrap();
+    assert_eq!(e.room(), r.room);
+    assert_eq!(e.entry.expires_ms, ends42[5] * 1_000);
 
     // The next generation replaces the old key on other members, even when the
-    // old key sorts lower; a stale share never replaces it back.
+    // old key sorts lower; re-delivery of the already held share is an
+    // idempotent no-op, while a stale share adopted fresh is refused (see the
+    // new-head test below).
     let stale = peer.share(&G).unwrap();
+    peer.adopt(&after, &stale).unwrap();
+    assert_eq!(peer.room_id(&G).unwrap(), old_room);
     peer.adopt(&after, &r.share).unwrap();
     assert_eq!(peer.room_id(&G).unwrap(), r.room);
     peer.adopt(&after, &stale).unwrap();
     assert_eq!(peer.room_id(&G).unwrap(), r.room);
-    let e = peer.sign_listing(&after, &G, boundary, false).unwrap();
+    let e = peer
+        .sign_listing(&after, &G, left_at, &ends42, false)
+        .unwrap();
     assert_eq!(e.room(), r.room);
 
     // The leaver cannot rotate.
     let mut gone = share_to(&leaver_source(&s), &s, "m42");
     gone.prune(&after);
     assert_eq!(
-        gone.rotate(&after, &G, boundary).err().unwrap(),
+        gone.rotate(&after, &G, left_at).err().unwrap(),
         Error::Conflict
     );
     // A holder whose rotation became due after losing public status is refused.
     let (dropped, t) = drop_to_ingroup(s.clone(), NOW);
     let mut late = share_to(&leaver_source(&s), &s, "m1");
-    let due = (t / LISTING_WINDOW + 1) * LISTING_WINDOW;
-    assert!(late.rotation_due(&dropped, &G, due));
+    assert!(late.rotation_due(&dropped, &G));
     assert_eq!(
-        late.rotate(&dropped, &G, due).err().unwrap(),
+        late.rotate(&dropped, &G, t).err().unwrap(),
         Error::Authority
     );
-    // Far-future clock overflows the counter.
+    // Far-future clock overflows the tombstone.
     let mut big = share_to(&leaver_source(&s), &s, "m1");
     assert_eq!(big.rotate(&after, &G, 1 << 60).err().unwrap(), Error::Clock);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_stale_key_cannot_publish_against_the_new_head() {
+    let s = public_room();
+    let mut l = Listings::new(COMMUNITY, "m0");
+    l.create(&s, &G).unwrap();
+    let live = l
+        .sign_listing(&s, &G, NOW, &ends_from(NOW, 43), false)
+        .unwrap();
+    // A fellow member holds the pre-departure key.
+    let mut old_holder = share_to(&l, &s, "m1");
+
+    let left_at = NOW + 10;
+    let after = leave(&s, G, "m42", left_at);
+    let r = l.rotate(&after, &G, left_at).unwrap();
+    // The pre-departure entry names the old head only.
+    assert_ne!(live.room(), r.room);
+    // The stale key cannot sign the new head: rotation is an inseparable part
+    // of the departure fact, so the old head is dead for live entries.
+    assert_eq!(
+        old_holder
+            .sign_listing(&after, &G, left_at, &ends_from(left_at, 42), false)
+            .err()
+            .unwrap(),
+        Error::Conflict
+    );
+    // It cannot even be adopted fresh against the new head.
+    let mut fresh = Listings::new(COMMUNITY, "m2");
+    assert_eq!(
+        fresh
+            .adopt(&after, &old_holder.share(&G).unwrap())
+            .err()
+            .unwrap(),
+        Error::Conflict
+    );
+    // Convergence: the new share wins everywhere, and the new head signs.
+    old_holder.adopt(&after, &r.share).unwrap();
+    assert_eq!(old_holder.room_id(&G).unwrap(), r.room);
+    let e = old_holder
+        .sign_listing(&after, &G, left_at, &ends_from(left_at, 42), false)
+        .unwrap();
+    assert_eq!(e.room(), r.room);
 }
 
 fn forked(parent_remaining_leavers: std::ops::Range<usize>) -> (Snapshot, u64) {
@@ -421,20 +569,22 @@ fn the_larger_fork_keeps_the_key_after_the_wait_and_every_fork_rotates() {
     let mut l = Listings::new(COMMUNITY, "m0");
     l.create(&even, &G).unwrap();
     let room_id = l.room_id(&G).unwrap();
+    // Project the parent before the fork so the handover has an order to keep.
+    let pends = ends_from(t0, 100);
+    let plast = l.sign_listing(&even, &G, t0, &pends, false).unwrap();
     assert_eq!(
         l.fork(&even, (&G, &CHILD), WAIT, t0 + WAIT + 1),
         Ok(Keeper::Parent)
     );
     assert_eq!(l.room_id(&G).unwrap(), room_id);
-    // The fork scheduled a rotation for the next window boundary.
-    let boundary = (t0 / LISTING_WINDOW + 1) * LISTING_WINDOW;
-    assert!(!l.rotation_due(&even, &G, boundary - 1));
-    assert!(l.rotation_due(&even, &G, boundary));
+    // The fork schedules an immediate rotation: due right away, no window wait.
+    assert!(l.rotation_due(&even, &G));
     // The child inherited the name and description of the parent.
     let child_entry = {
         let mut c = Listings::new(COMMUNITY, "m0");
         c.create(&even, &CHILD).unwrap();
-        c.sign_listing(&even, &CHILD, t0 + 1, false).unwrap()
+        c.sign_listing(&even, &CHILD, t0 + 1, &ends_from(t0 + 1, 80), false)
+            .unwrap()
     };
     assert_eq!(child_entry.entry.name, "Hike");
 
@@ -445,13 +595,19 @@ fn the_larger_fork_keeps_the_key_after_the_wait_and_every_fork_rotates() {
         Ok(Keeper::Parent)
     );
     assert_eq!(l.room_id(&CHILD), Err(Error::Authority));
-    // After the wait the key moves to the child on this device.
+    // After the wait the key moves to the child on this device, with the room.
     let decided = t0 + WAIT;
     assert_eq!(l.fork(&s, (&G, &CHILD), WAIT, decided), Ok(Keeper::Child));
     assert_eq!(l.room_id(&CHILD).unwrap(), room_id);
     assert_eq!(l.room_id(&G), Err(Error::Authority));
-    let e = l.sign_listing(&s, &CHILD, decided, false).unwrap();
-    assert_eq!(e.entry.counter >> 32, decided / LISTING_WINDOW + 1);
+    // The handover is resolved, not pending: no forced rotation on the keeper.
+    assert!(!l.rotation_due(&s, &CHILD));
+    let cends = ends_from(decided, 80);
+    let e = l.sign_listing(&s, &CHILD, decided, &cends, false).unwrap();
+    // The floor orders the child's first counter above the parent's last, while
+    // the expiry stays the child's own truthful crossing.
+    assert!(e.entry.counter > plast.entry.counter);
+    assert_eq!(e.entry.expires_ms, cends[80 - 37] * 1_000);
     assert_eq!(e.room(), room_id);
 
     // A member who stayed only in the parent drops the key; a holder without a key is unaffected.

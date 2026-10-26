@@ -21,7 +21,9 @@ Invariants (rule -> enforcing test in `tests/cases/` unless noted):
 - Hysteresis thresholds are signed settings with enforced order (public 43/36,
   ingroup 13/10, cap 256)
   -> `adversarial.rs::invalid_policy_never_becomes_authority`, `lifecycle.rs::privacy_forks_timeout_and_shrink`
-- Listing expiry bounded and monotone; key rotates at the next window after churn/fork
+- Listing entry valid exactly while public by the warm count (expiry = computed
+  warm-count crossing below 36, monotone counter); key rotates immediately on
+  churn/fork; a stale key can only withdraw, never sign live or adopt fresh
   -> `listing.rs::entries_are_deterministic_monotone_and_bounded`
 - No own crypto/compression/ledger; seats disabled (`seats.enabled` refused);
   accounting grants are foreign
