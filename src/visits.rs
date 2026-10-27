@@ -85,6 +85,7 @@ impl VisitLedger {
             return Err(Error::Invalid);
         }
         let bucket_start = now_ticks - (now_ticks % crate::warm::BUCKET_TICKS);
+        self.bound_sent(now_ticks);
         let key = (member.to_owned(), *group, bucket_start);
         if self.pending.contains_key(&key) || self.sent.contains(&key) {
             return Ok(RecordOutcome::Duplicate);
@@ -127,6 +128,16 @@ impl VisitLedger {
         Ok(())
     }
 
+    /// The `sent` set is a state of the slot time, not a growing log: a key
+    /// whose bucket ended its longest warm window before `now_ticks` can never
+    /// be recorded again (openings always fall into the current bucket), so it
+    /// is not part of the state at all.
+    fn bound_sent(&mut self, now_ticks: u64) {
+        self.sent.retain(|(_, _, bucket_start)| {
+            bucket_start.saturating_add(crate::warm::WARM_MAX_TICKS) > now_ticks
+        });
+    }
+
     pub fn drop_undelivered(&mut self) {
         self.pending.clear();
     }
@@ -135,10 +146,72 @@ impl VisitLedger {
         self.pending.len()
     }
 
+    /// Supplied keys this device still remembers (bounded by the warm window).
+    pub fn sent_count(&self) -> usize {
+        self.sent.len()
+    }
+
     pub fn is_sent(&self, member: &str, group: &Id, bucket_start: u64) -> bool {
         self.sent
             .contains(&(member.to_owned(), *group, bucket_start))
     }
+}
+
+/// Warm ends (ticks) of `group` at `now_ticks`, derived purely from WasHere
+/// facts (own plus received) and slot time; no TTL, timer or cleanup.
+pub fn warm_ends(
+    facts: &[WasHere],
+    group: &Id,
+    eligible: &BTreeSet<String>,
+    now_ticks: u64,
+) -> Result<Vec<u64>> {
+    use crate::warm::{BUCKET_TICKS, COOL_MAX_TICKS, CheckIn, Seat, WARM_MAX_TICKS};
+    // The state's horizon is one full seat lifetime: an older fact can be
+    // neither warm nor cooling, so it is not an input at all.
+    let horizon = WARM_MAX_TICKS + COOL_MAX_TICKS;
+    let mut canonical: BTreeSet<(u64, &str)> = BTreeSet::new();
+    for fact in facts {
+        if fact.member.is_empty()
+            || fact.member.len() > 200
+            || fact.bucket_start % BUCKET_TICKS != 0
+        {
+            return Err(Error::Invalid);
+        }
+        if fact.group == *group
+            && eligible.contains(&fact.member)
+            && fact.bucket_start <= now_ticks
+            && fact.bucket_start.saturating_add(horizon) > now_ticks
+        {
+            canonical.insert((fact.bucket_start, fact.member.as_str()));
+        }
+    }
+    // Fold in canonical order (bucket, member): `n` is frozen from the warm
+    // count immediately before each fact, the agreed sequence is its index.
+    let mut latest: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut checkins = Vec::with_capacity(canonical.len());
+    for (seq, (bucket_start, member)) in canonical.into_iter().enumerate() {
+        let before = latest.values().filter(|end| **end > bucket_start).count() as u64;
+        let frozen_n = before.max(1);
+        let end = bucket_start
+            .checked_add(crate::warm::warm_duration_ticks(frozen_n))
+            .ok_or(Error::Capacity)?;
+        latest.insert(member, end);
+        checkins.push(CheckIn {
+            member: member.to_owned(),
+            // Devices never count; the member stands in for its devices.
+            device: member.to_owned(),
+            bucket_start,
+            frozen_n,
+            seq: seq as u64,
+        });
+    }
+    let view = crate::warm::evaluate(&checkins, &BTreeSet::new(), &[], now_ticks)?;
+    Ok(view
+        .seats
+        .into_iter()
+        .filter(|seat| seat.state == Seat::Warm)
+        .filter_map(|seat| seat.warm_end)
+        .collect())
 }
 
 #[cfg(test)]
@@ -321,6 +394,110 @@ mod tests {
         let second = ledger.due_for_exchange(100);
         assert_eq!(first, second);
         assert_eq!(ledger.pending_count(), 1);
+        assert!(!ledger.is_sent("a", &g, 0));
+    }
+
+    use crate::warm::{COOL_MAX_TICKS, WARM_MAX_TICKS, warm_duration_ticks};
+
+    fn fact(member: &str, g: &Id, bucket: u64) -> WasHere {
+        WasHere {
+            member: member.into(),
+            group: *g,
+            bucket_start: bucket * BUCKET_TICKS,
+        }
+    }
+
+    fn members(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|m| m.to_string()).collect()
+    }
+
+    #[test]
+    fn warm_ends_freeze_n_from_the_warm_count_before_each_fact() {
+        let g = group(1);
+        let all = members(&["a", "b", "c", "d", "e", "f"]);
+        let facts: Vec<_> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|m| fact(m, &g, 0))
+            .collect();
+        let mut ends = warm_ends(&facts, &g, &all, 1).expect("derives");
+        ends.sort_unstable();
+        // a..e see W before = 0..4 (n = max(1, W) <= 4: 28 days); f sees 5.
+        let mut expected = vec![WARM_MAX_TICKS; 5];
+        expected.insert(0, warm_duration_ticks(5));
+        assert_eq!(ends, expected);
+        assert!(warm_duration_ticks(5) < WARM_MAX_TICKS);
+    }
+
+    #[test]
+    fn warm_ends_are_a_pure_function_of_facts_and_time() {
+        let g = group(1);
+        let all = members(&["a", "b", "c"]);
+        let mut facts = vec![
+            fact("a", &g, 0),
+            fact("b", &g, 1),
+            fact("c", &g, 2),
+            fact("a", &g, 3),
+        ];
+        let first = warm_ends(&facts, &g, &all, 3 * BUCKET_TICKS).expect("derives");
+        facts.reverse();
+        // Duplicates (another device of the same member) count once.
+        facts.push(fact("b", &g, 1));
+        assert_eq!(
+            warm_ends(&facts, &g, &all, 3 * BUCKET_TICKS).expect("derives"),
+            first
+        );
+        // Three members, three seats: a's later visit replaces its earlier one.
+        assert_eq!(first.len(), 3);
+        assert!(first.contains(&(3 * BUCKET_TICKS + WARM_MAX_TICKS)));
+    }
+
+    #[test]
+    fn warm_ends_ignore_other_groups_and_non_members() {
+        let g = group(1);
+        let all = members(&["a"]);
+        let facts = vec![fact("a", &g, 0), fact("x", &g, 0), fact("a", &group(2), 1)];
+        assert_eq!(
+            warm_ends(&facts, &g, &all, 1).expect("derives"),
+            vec![WARM_MAX_TICKS]
+        );
+    }
+
+    #[test]
+    fn an_empty_room_has_no_warm_ends() {
+        let g = group(1);
+        let all = members(&["a", "b"]);
+        let facts = vec![fact("a", &g, 0), fact("b", &g, 0)];
+        // Time alone moves the state: at the warm end the seat is no longer warm.
+        assert!(
+            warm_ends(&facts, &g, &all, WARM_MAX_TICKS)
+                .expect("derives")
+                .is_empty()
+        );
+        assert!(warm_ends(&[], &g, &all, 0).expect("derives").is_empty());
+        // Facts beyond the seat lifetime are outside the state.
+        let far = WARM_MAX_TICKS + COOL_MAX_TICKS + 1;
+        assert!(
+            warm_ends(&facts, &g, &all, far)
+                .expect("derives")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn sent_keys_are_bounded_by_the_warm_window() {
+        let mut ledger = VisitLedger::new();
+        let g = group(1);
+        ledger.record_open("a", &g, 0, 0).expect("valid open");
+        let due = ledger.due_for_exchange(0);
+        ledger.mark_exchanged(&due).expect("exchanges");
+        assert_eq!(ledger.sent_count(), 1);
+        // Still inside the warm window: remembered, a repeat records nothing.
+        ledger.record_open("a", &g, 1, 0).expect("valid open");
+        assert_eq!(ledger.sent_count(), 1);
+        // Past the longest warm window of that bucket: not part of the state.
+        let later = WARM_MAX_TICKS + BUCKET_TICKS;
+        ledger.record_open("a", &g, later, 0).expect("valid open");
+        assert_eq!(ledger.sent_count(), 0);
         assert!(!ledger.is_sent("a", &g, 0));
     }
 }
