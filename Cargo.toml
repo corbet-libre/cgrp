@@ -13,7 +13,7 @@ serde_json = "1"
 thiserror = "2"
 schemars = "1"
 ckmg = { git = "https://git.corbet.ch/corbet-libre/ckmg.git", branch = "main" }
-cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "main" }
+cwst = { git = "https://git.corbet.ch/corbet-libre/cwst.git", branch = "main" }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 cmbl = { git = "https://git.corbet.ch/corbet-libre/cmbl.git", branch = "main" }
 ed25519-dalek = "3"
